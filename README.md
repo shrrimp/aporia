@@ -5,7 +5,7 @@
 **Status:** working prototype. You can create a profile and a project, have your tutor (Claude
 Code on your own login) interview you and write interactive lessons, answer drills, play with
 3D explorables, ask about any selected passage, and undo anything the tutor changed. See
-[`docs/decisions.md`](docs/decisions.md) for the roadmap and known gaps.
+[`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 The product name lives in exactly one file: [`packages/brand/brand.json`](packages/brand/brand.json).
 
@@ -75,7 +75,8 @@ non-entry-point code. Entry points are covered by smoke tests and spikes.
 | [teaching-engine](docs/teaching-engine.md) | Flows: goal capture, interview, curriculum, lesson loop, source import |
 | [ux](docs/ux.md) | Screens, workspace, "ask about this", history/undo, motivation |
 | [quality](docs/quality.md) | Testing strategy, including evaluating the agent |
-| [decisions](docs/decisions.md) | Decision log, **roadmap status and known gaps** |
+| [roadmap](docs/roadmap.md) | **The plan**: phases, what each contains, and the test that says it's done |
+| [decisions](docs/decisions.md) | Decision log and implementation status |
 | [names](docs/names.md) | Name candidates |
 
 ## License

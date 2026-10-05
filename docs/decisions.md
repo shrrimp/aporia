@@ -44,6 +44,8 @@
 
 ## Roadmap and status
 
+The forward-looking plan lives in [`roadmap.md`](roadmap.md). This table records what has been built.
+
 | Step | Status |
 |---|---|
 | 0. Spikes: ACP + Claude subscription, MCP via ACP, permission routing | **Done** (architecture §8) |
