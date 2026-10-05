@@ -122,7 +122,7 @@ export function Explorable({ doc }: { doc: ExplorableDoc }) {
               return (
                 <div key={i}>
                   <dt>{r.label}</dt>
-                  <dd className="lcd">{text}</dd>
+                  <dd className="num">{text}</dd>
                 </div>
               );
             })}

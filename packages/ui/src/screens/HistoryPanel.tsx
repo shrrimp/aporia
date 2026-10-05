@@ -73,7 +73,7 @@ export function HistoryPanel() {
           </li>
         ))}
       </ol>
-      {items.length === 0 && <p className="hint">Nothing yet.</p>}
+      {items.length === 0 && <p className="quiet">Nothing yet.</p>}
     </section>
   );
 }

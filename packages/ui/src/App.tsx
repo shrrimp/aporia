@@ -4,16 +4,16 @@ import { useQuery, useStatus } from './hooks.tsx';
 import { ProfilePicker } from './screens/ProfilePicker.tsx';
 import { Home } from './screens/Home.tsx';
 import { ProjectView } from './screens/ProjectView.tsx';
+import { MathField } from './MathField.tsx';
+import { PixelMark } from './PixelMark.tsx';
 
-function Nav({ name, children }: { name: string | undefined; children: React.ReactNode }) {
+function Header({ name, children }: { name: string | undefined; children?: React.ReactNode }) {
   return (
-    <header className="nav">
-      <div className="nav-pill">
-        <span className="logo" aria-hidden>a</span>
-        <span className="nav-name">{name}</span>
-        <span className="nav-rule" aria-hidden />
-        {children}
-      </div>
+    <header className="bar">
+      <PixelMark size={16} />
+      <span className="wordmark">{name}</span>
+      <span className="bar-fill" />
+      {children}
     </header>
   );
 }
@@ -25,22 +25,20 @@ export function App() {
   const [project, setProject] = useState<ProjectDTO>();
   return (
     <div className="app">
+      <MathField />
       {status !== 'open' && <div className="offline" role="status">{status === 'connecting' ? 'Connecting…' : 'Disconnected. Reconnecting…'}</div>}
       {!profile ? (
         <>
-          <Nav name={info.data?.name}>
-            <span className="nav-tagline">{info.data?.tagline}</span>
-          </Nav>
+          <Header name={info.data?.name} />
           <ProfilePicker onOpen={setProfile} />
         </>
       ) : !project ? (
         <>
-          <Nav name={info.data?.name}>
-            <button type="button" className="nav-profile" onClick={() => setProfile(undefined)}>
-              <span className="avatar small" aria-hidden>{profile.displayName.slice(0, 1).toUpperCase()}</span>
+          <Header name={info.data?.name}>
+            <button type="button" className="text" onClick={() => setProfile(undefined)}>
               {profile.displayName} · switch
             </button>
-          </Nav>
+          </Header>
           <Home onOpen={setProject} />
         </>
       ) : (

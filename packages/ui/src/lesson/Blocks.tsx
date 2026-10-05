@@ -143,7 +143,7 @@ function Task({ doc }: { doc: Of<'task'> }) {
     <article className="task" data-anchor={`task:${doc.id}`}>
       <header>
         <span className="task-label">Task</span> {doc.title}
-        <span className="scaffold" title="How much structure this task gives you">{SCAFFOLD[doc.scaffold]}</span>
+        <span className="scaffold" title="How much structure this task gives you">{SCAFFOLD[doc.scaffold]} level</span>
       </header>
       {doc.files.length > 0 && <p className="files">{doc.files.join(' · ')}</p>}
       <Markdown md={doc.goal} />
@@ -165,8 +165,8 @@ function Task({ doc }: { doc: Of<'task'> }) {
       )}
       {doc.checkpoint && (
         <p className="checkpoint">
-          <span className="lcd counter">
-            {doc.checkpoint.expect.passed}/{doc.checkpoint.expect.of}
+          <span className="counter num">
+            {doc.checkpoint.expect.passed} / {doc.checkpoint.expect.of}
           </span>
           <span>
             checks in <code>{doc.checkpoint.suite}</code> should pass when this step is done.

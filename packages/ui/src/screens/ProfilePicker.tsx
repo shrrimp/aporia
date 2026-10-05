@@ -15,20 +15,14 @@ export function ProfilePicker({ onOpen }: { onOpen: (p: ProfileDTO) => void }) {
     }
   };
   return (
-    <main className="screen center hero">
-      <p className="badge-pill">
-        <span className="dot" aria-hidden />
-        Local, private, yours
-      </p>
-      <h1 className="headline">
-        Who is <em className="hl">learning?</em>
-      </h1>
+    <main className="screen">
+      <h1>Who is learning?</h1>
       <ul className="profiles">
         {profiles.data?.map((p) => (
           <li key={p.id}>
-            <button type="button" onClick={() => void open(p.id)}>
-              <span className="avatar" aria-hidden>{p.displayName.slice(0, 1).toUpperCase()}</span>
-              {p.displayName}
+            <button type="button" className="row" onClick={() => void open(p.id)}>
+              <span className="initial" aria-hidden>{p.displayName.slice(0, 1).toUpperCase()}</span>
+              <span className="row-title">{p.displayName}</span>
             </button>
           </li>
         ))}
@@ -52,7 +46,7 @@ export function ProfilePicker({ onOpen }: { onOpen: (p: ProfileDTO) => void }) {
         </label>
         <button type="submit" className="primary" disabled={name.trim() === ''}>Create</button>
       </form>
-      <p className="hint">
+      <p className="quiet">
         Each profile is a separate folder on this computer. People who share an OS account can read each other's files unless profiles are encrypted.
       </p>
       {error && <p className="error" role="alert">{error}</p>}

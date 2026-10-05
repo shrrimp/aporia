@@ -169,7 +169,7 @@ describe('reading components', () => {
 
   it('renders tasks without optional parts', () => {
     withActions(block({ type: 'task', id: 't', title: 'Plain', scaffold: 1, kcs: ['k'], files: [], goal: 'Do it', traps: [] }));
-    expect(screen.getByText('Goal only')).toBeInTheDocument();
+    expect(screen.getByText('Goal only level')).toBeInTheDocument();
     expect(screen.queryByText(/Checkpoint/)).toBeNull();
   });
 });

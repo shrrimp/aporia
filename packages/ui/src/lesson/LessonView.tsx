@@ -1,7 +1,6 @@
 import type { Lesson } from '@app/catalog';
 import { Markdown } from './Markdown.tsx';
 import { Block } from './Blocks.tsx';
-import { Headline } from '../lib/Headline.tsx';
 
 const ROLE_LABEL: Record<string, string> = {
   warmup: 'Warm-up',
@@ -18,18 +17,19 @@ export function LessonView({ lesson }: { lesson: Lesson }) {
   return (
     <article className="lesson">
       <header className="lesson-head">
-        <p className="badge-pill">
-          <span className="dot" aria-hidden />
+        <p className="meta">
           {lesson.kind.charAt(0).toUpperCase() + lesson.kind.slice(1)} · about {lesson.estimateMin} min
         </p>
-        <Headline text={lesson.title} />
-        <Markdown md={lesson.standfirst} />
+        <h1>{lesson.title}</h1>
+        <div className="standfirst">
+          <Markdown md={lesson.standfirst} />
+        </div>
         {lesson.capability && <p className="capability">After this: {lesson.capability}</p>}
       </header>
       {lesson.sections.map((s, si) => (
         <section key={s.id} className={`lesson-section role-${s.role}`} data-anchor={s.id}>
           <h2>
-            <span className="num lcd">{String(si + 1).padStart(2, '0')}</span>
+            <span className="num">{String(si + 1).padStart(2, '0')}</span>
             {s.title ?? ROLE_LABEL[s.role]}
           </h2>
           {s.blocks.map((b, bi) => (

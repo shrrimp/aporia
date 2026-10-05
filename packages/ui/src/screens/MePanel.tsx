@@ -41,10 +41,10 @@ export function MePanel({ profile, onSettings }: { profile: ProfileDTO; onSettin
           </tbody>
         </table>
       ) : (
-        <p className="hint">No evidence yet. Skills appear as you answer and build.</p>
+        <p className="quiet">No evidence yet. Skills appear as you answer and build.</p>
       )}
       <h3>How you seem to learn</h3>
-      <p className="hint">Hypotheses your tutor formed. Trust grows when a pattern repeats and shrinks when it is contradicted.</p>
+      <p className="quiet">Hypotheses your tutor formed. Trust grows when a pattern repeats and shrinks when it is contradicted.</p>
       <ul className="insights">
         {d?.insights.map((i) => (
           <li key={i.id}>

@@ -27,9 +27,7 @@ function NewProject({ onCreated, onCancel }: { onCreated: (p: ProjectDTO) => voi
         }
       }}
     >
-      <h2 className="headline">
-        Start a new <em className="hl">project.</em>
-      </h2>
+      <h1>New project</h1>
       <label>
         What do you want to build or understand?
         <input required value={f.title} onChange={set('title')} placeholder="A reduced-coordinate physics engine" />
@@ -68,21 +66,21 @@ export function Home({ onOpen }: { onOpen: (p: ProjectDTO) => void }) {
   if (creating) return <main className="screen"><NewProject onCreated={onOpen} onCancel={() => setCreating(false)} /></main>;
   return (
     <main className="screen">
-      <h1 className="headline">
-        Your <em className="hl">projects.</em>
-      </h1>
+      <h1>Projects</h1>
       <ul className="projects">
         {projects.data?.map((p) => (
           <li key={p.id}>
-            <button type="button" className="project-card" onClick={() => onOpen(p)}>
-              <strong>{p.title}</strong>
-              <span>{p.goal}</span>
-              <span className="meta">{p.workspace ? 'Code project' : 'Study project'}</span>
+            <button type="button" className="row" onClick={() => onOpen(p)}>
+              <span className="row-title">{p.title}</span>
+              <span className="row-sub">{p.goal}</span>
+              <span className="row-meta">{p.workspace ? 'code' : 'study'}</span>
             </button>
           </li>
         ))}
         <li>
-          <button type="button" className="new" onClick={() => setCreating(true)}>+ Start a new project</button>
+          <button type="button" className="row new" onClick={() => setCreating(true)}>
+            + Start a new project
+          </button>
         </li>
       </ul>
     </main>

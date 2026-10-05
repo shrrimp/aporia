@@ -20,12 +20,12 @@ try {
   if (!connection?.url.startsWith('http://127.0.0.1:')) throw new Error('preload did not provide the connection');
   await page.getByPlaceholder('Your name').fill('Smoke');
   await page.getByRole('button', { name: 'Create' }).click();
-  await page.getByRole('heading', { name: 'Your projects.' }).waitFor();
+  await page.getByRole('heading', { name: 'Projects' }).waitFor();
   await page.getByRole('button', { name: '+ Start a new project' }).click();
   await page.getByLabel(/What do you want/).fill('Smoke project');
   await page.getByLabel('Describe the goal').fill('Check the shell works');
   await page.getByRole('button', { name: 'Create project' }).click();
-  await page.getByText('No lessons yet.').waitFor();
+  await page.getByRole('button', { name: 'Start the interview' }).waitFor();
   const nodeIntegration = await page.evaluate(() => typeof (globalThis as { require?: unknown }).require);
   if (nodeIntegration !== 'undefined') throw new Error('renderer can reach Node');
   if (process.argv[2]) await page.screenshot({ path: process.argv[2] });
