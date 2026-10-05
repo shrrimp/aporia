@@ -1,0 +1,22 @@
+{
+  "name": "@app/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.ts",
+    "start": "node build.ts && electron ."
+  },
+  "dependencies": {
+    "@app/brand": "*",
+    "@app/core": "*",
+    "@app/server": "*"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "electron": "^44.5.1",
+    "esbuild": "^0.28.2"
+  }
+}
