@@ -1,0 +1,25 @@
+{
+  "name": "@app/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    ".": "./src/index.ts",
+    "./protocol": "./src/protocol.ts"
+  },
+  "dependencies": {
+    "@app/agent-host": "*",
+    "@app/brand": "*",
+    "@app/catalog": "*",
+    "@app/core": "*",
+    "@app/teacher-mcp": "*",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "^1.7.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@types/ws": "^8.18.2"
+  }
+}
