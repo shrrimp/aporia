@@ -5,13 +5,13 @@ import { ProfilePicker } from './screens/ProfilePicker.tsx';
 import { Home } from './screens/Home.tsx';
 import { ProjectView } from './screens/ProjectView.tsx';
 import { MathField } from './MathField.tsx';
-import { PixelMark } from './PixelMark.tsx';
+import { Wordmark } from './PixelMark.tsx';
 
 function Header({ name, children }: { name: string | undefined; children?: React.ReactNode }) {
   return (
     <header className="bar">
-      <PixelMark size={16} />
-      <span className="wordmark">{name}</span>
+      <Wordmark height={27} />
+      <span className="sr-only">{name}</span>
       <span className="bar-fill" />
       {children}
     </header>

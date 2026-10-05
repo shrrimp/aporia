@@ -4,7 +4,7 @@ import type { ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc } from '../hooks.tsx';
 import { LessonView } from '../lesson/LessonView.tsx';
 import { LessonActionsContext, type LessonActions } from '../lesson/actions.tsx';
-import { PixelMark } from '../PixelMark.tsx';
+import { PixelMark, Wordmark } from '../PixelMark.tsx';
 import { Conversation, type AskRequest } from './Conversation.tsx';
 import { HistoryPanel } from './HistoryPanel.tsx';
 import { MePanel } from './MePanel.tsx';
@@ -117,6 +117,8 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
   return (
     <div className="project">
       <header className="bar">
+        <Wordmark height={18} working={sessionBusy || chatBusy} />
+        <span className="crumb-sep" aria-hidden>/</span>
         <button type="button" className="text" onClick={onBack}>
           Projects
         </button>
