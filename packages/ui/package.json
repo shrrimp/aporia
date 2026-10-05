@@ -12,6 +12,7 @@
     "@app/brand": "*",
     "@app/catalog": "*",
     "@app/server": "*",
+    "@fontsource/pixelify-sans": "^5.3.0",
     "katex": "^0.19.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

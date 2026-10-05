@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import 'katex/dist/katex.min.css';
+import '@fontsource/pixelify-sans/700.css';
 import './styles.css';
 import { z } from 'zod';
 import { brand } from '@app/brand';
