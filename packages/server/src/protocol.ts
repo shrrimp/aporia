@@ -4,6 +4,7 @@
  * server pushes {event, data}.
  */
 import { z } from 'zod';
+import type { LearnerForm } from '@app/catalog';
 
 export const slugId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 
@@ -145,7 +146,9 @@ export type AskEvent =
   | { kind: 'tool'; id: string; title?: string; status?: string; toolKind?: string }
   | { kind: 'permission'; title: string; decision: { allow: boolean; reason: string } }
   | { kind: 'blocked-fs'; op: 'read' | 'write'; path: string }
-  | { kind: 'stop'; reason: string };
+  | { kind: 'stop'; reason: string }
+  /** The tutor asked for structured answers: render this form; answers go back as the next question. */
+  | { kind: 'form'; form: LearnerForm };
 
 export interface ServerEvents {
   'ask.event': { askId: string; event: AskEvent };

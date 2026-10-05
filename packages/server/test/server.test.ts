@@ -218,6 +218,18 @@ describe('asking the agent', () => {
     await expect(c.call('history.accept', { id: pending.id })).rejects.toMatchObject({ code: 'conflict' });
   });
 
+  it('forwards forms from the teaching tools to the UI, and answers go back as the next question', async () => {
+    const c = await client();
+    const { project } = await withProject(c);
+    const r = await c.call('ask', { projectId: project.id, question: 'Interview me briefly to find out what I already know' });
+    const form = await c.waitFor((e) => e.event === 'ask.event' && e.data.askId === r.askId && e.data.event.kind === 'form');
+    expect(form.data.event.form).toMatchObject({ title: 'Where you are starting from' });
+    await c.waitFor((e) => e.event === 'ask.done' && e.data.askId === r.askId);
+    const answers = await c.call('ask', { projectId: project.id, question: 'Answers to the form "Where you are starting from":\n- [probe] …\n  → I don\'t know yet' });
+    await c.waitFor((e) => e.event === 'ask.done' && e.data.askId === answers.askId);
+    expect((await c.call('learner.summary')).kcs.map((k) => k.kc)).toContain('quaternion.unit');
+  });
+
   it('summarises every kind of observation in the history and the learner model', async () => {
     const c = await client();
     const { project } = await withProject(c);

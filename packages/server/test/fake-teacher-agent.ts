@@ -60,16 +60,37 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }): a
         const question = text.split('The learner asks:\n')[1] ?? '';
         if (question.startsWith('Interview me')) {
           await tool('get_teaching_context', () => mcp.callTool({ name: 'get_teaching_context', arguments: {} }));
-          await pause(1200);
-          for (const chunk of [
-            "Let's find your starting point. Three quick questions, answer in your own words; guessing is fine.\n\n",
-            '1. A rigid body in 3D: how many numbers do you need to say *where it is and how it is turned*, and why might you store more than that?\n\n',
-            '2. You rotate a vector by a quaternion with $q\\,v\\,q^*$. What goes wrong if $|q| \\neq 1$?\n\n',
-            '3. In your engine today, where does angular velocity live: world frame or body frame?',
-          ]) {
-            await say(chunk);
-            await pause(250);
-          }
+          await pause(900);
+          await say("Let's find your starting point. A few quick questions: click what fits, and guessing is fine.");
+          await tool('ask_learner', () =>
+            mcp.callTool({
+              name: 'ask_learner',
+              arguments: {
+                form: {
+                  title: 'Where you are starting from',
+                  intro: 'No wrong answers here: this only decides where the first lesson begins.',
+                  questions: [
+                    { id: 'background', kind: 'single', prompt: 'How have you worked with 3D rotations so far?', options: ['Never really', 'Euler angles in a game or tool', 'Rotation matrices by hand', 'Quaternions in code'], allowOther: true },
+                    { id: 'comfort', kind: 'scale', prompt: 'How comfortable are you with linear algebra?', low: 'shaky', high: 'fluent' },
+                    { id: 'tools', kind: 'multi', prompt: 'Which of these have you used?', options: ['glm', 'Eigen', 'numpy', 'a physics engine (Bullet, PhysX…)'] },
+                    { id: 'probe', kind: 'text', prompt: 'You rotate $v$ by $q\\,v\\,q^*$. What goes wrong if $|q| \\neq 1$?', placeholder: 'One sentence is enough' },
+                    { id: 'order', kind: 'rank', prompt: 'Order what matters most to you right now:', options: ['Understanding the maths', 'Working code fast', 'Avoiding numerical drift'] },
+                  ],
+                  submitLabel: 'Send answers',
+                },
+              },
+            }),
+          );
+        } else if (question.startsWith('Answers to the form')) {
+          await tool('record_evidence', () =>
+            mcp.callTool({
+              name: 'record_evidence',
+              arguments: { itemId: 'interview-probe', kcs: [{ kc: 'quaternion.unit' }], difficulty: 3, evidenceType: 'probe', outcome: 0.5 },
+            }),
+          );
+          await pause(600);
+          await say('Thanks. Here is what I understood: you are comfortable with matrices and want the maths to make sense before the code. ');
+          await say('The probe tells me the unit-length condition is the place to start. I will draft a first lesson around it.');
         } else if (question.startsWith('lesson')) {
           const r = await tool('draft_lesson', () => mcp.callTool({ name: 'draft_lesson', arguments: { lesson: fourNumbers } }));
           await say((r.content as { text: string }[])[0]!.text);

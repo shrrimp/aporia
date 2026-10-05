@@ -60,6 +60,7 @@ describe('teacher MCP server', () => {
   it('exposes the teaching tools with an ACP server descriptor', async () => {
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(tools).toEqual([
+      'ask_learner',
       'draft_lesson',
       'get_component_catalog',
       'get_lesson',
@@ -102,6 +103,24 @@ describe('teacher MCP server', () => {
     expect(t).toMatch(/Prefers the maths first \(id ins_/);
     expect(t).toMatch(/First-attempt success: 1\/2/);
     expect(t.indexOf('joint.nq-nv')).toBeLessThan(t.indexOf('quaternion.unit:'));
+  });
+
+  it('shows forms to the learner through the attached interface', async () => {
+    const shown: unknown[] = [];
+    const reg2 = server.register({ profile, projectId: 'hmp', agent, changeMode: () => mode, present: (f) => shown.push(f) });
+    const c2 = await connect(reg2.token);
+    const form = { title: 'Start', questions: [{ id: 'q1', kind: 'single', prompt: 'Which?', options: ['a', 'b'] }] };
+    const r = await c2.callTool({ name: 'ask_learner', arguments: { form } });
+    expect(text(r)).toMatch(/now in front of the learner. End your turn/);
+    expect(shown).toEqual([expect.objectContaining({ title: 'Start' })]);
+    const dup = await c2.callTool({ name: 'ask_learner', arguments: { form: { ...form, questions: [form.questions[0], form.questions[0]] } } });
+    expect(dup.isError).toBe(true);
+    expect(text(dup)).toMatch(/duplicate question id/);
+    await c2.close();
+    // The default context has no interface attached.
+    const none = await call('ask_learner', { form });
+    expect(none.isError).toBe(true);
+    expect(text(none)).toMatch(/No learner interface/);
   });
 
   it('rejects bad input clearly', async () => {

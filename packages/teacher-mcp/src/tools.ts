@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { brand } from '@app/brand';
-import { catalogGuide, validateLesson, type Problem } from '@app/catalog';
+import { catalogGuide, formProblems, learnerForm, validateLesson, type Problem } from '@app/catalog';
 import {
   ChangeError,
   ChangeValidationError,
@@ -60,6 +60,25 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
     'get_component_catalog',
     { description: 'Reference for writing lessons: every component, its fields, and the expression language.', annotations: { readOnlyHint: true } },
     async () => ok(`${RULES.lessonAuthoring}\n\n${catalogGuide()}`),
+  );
+
+  server.registerTool(
+    'ask_learner',
+    {
+      description:
+        'Show the learner a form instead of asking in prose, whenever you need several answers or an answer with a shape ' +
+        '(choices, numbers, a 1–5 scale, a ranking, short answers). Use it for the interview and for diagnostic probes. ' +
+        'Keep each form short (3–6 questions). After calling it, end your turn: the answers arrive as the next message.',
+      inputSchema: { form: learnerForm },
+    },
+    async ({ form }) =>
+      guard(async () => {
+        const problems = formProblems(form);
+        if (problems.length) return fail(`Fix the form:\n${problems.map((p) => `- ${p}`).join('\n')}`);
+        if (!ctx.present) return fail('No learner interface is attached; ask in plain text instead.');
+        ctx.present(form);
+        return ok(`The form "${form.title}" is now in front of the learner. End your turn now; their answers will arrive as the next message.`);
+      }),
   );
 
   server.registerTool(

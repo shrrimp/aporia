@@ -4,13 +4,19 @@ import type { AgentHost, AgentSpec, HostEvent } from '@app/agent-host';
 import { resolveInside, type OpenProfile } from '@app/core';
 import { systemPrompt, type Registration, type TeacherHttpServer } from '@app/teacher-mcp';
 import { brand } from '@app/brand';
+import type { LearnerForm } from '@app/catalog';
 import type { ProfileDTO, ProjectDTO } from './protocol.ts';
+
+/** Everything a turn can produce for the UI: the agent's own events, plus forms shown via the teaching tools. */
+export type TurnEvent = HostEvent | { readonly kind: 'form'; readonly form: LearnerForm };
 
 export type HostFactory = (spec: AgentSpec) => Promise<AgentHost>;
 
 interface Live {
   readonly sessionId: string;
   readonly reg: Registration;
+  /** Where forms from `ask_learner` go during the current turn. */
+  sink: ((e: TurnEvent) => void) | undefined;
 }
 
 /**
@@ -56,11 +62,13 @@ export class AgentSessions {
   async #open(project: ProjectDTO): Promise<Live> {
     const host = await this.#hostOnce();
     const session = randomUUID();
+    const live: { sink: Live['sink'] } = { sink: undefined };
     const reg = this.#teacher.register({
       profile: this.#profile,
       projectId: project.id,
       agent: { kind: 'agent', agent: this.#spec.id, session },
       changeMode: () => this.#settings().changeMode,
+      present: (form) => live.sink?.({ kind: 'form', form }),
     });
     // Code projects run in their workspace; others in their own project folder.
     const cwd = project.workspace ?? resolveInside(this.#profile.dir, 'projects', project.id);
@@ -69,7 +77,7 @@ export class AgentSessions {
       { cwd, additionalDirectories: [], mcpServers: [reg.acpServer], systemPrompt: systemPrompt() },
       { readRoots: [cwd], trustedMcpServers: [brand.id] },
     );
-    return { sessionId, reg };
+    return Object.assign(live, { sessionId, reg });
   }
 
   /** Run one learner question through the agent. */
@@ -77,7 +85,7 @@ export class AgentSessions {
     project: ProjectDTO,
     lessonId: string | undefined,
     prompt: string,
-    onEvent: (e: HostEvent) => void,
+    onEvent: (e: TurnEvent) => void,
     onStart: (cancel: () => Promise<void>) => void,
   ): Promise<string> {
     const key = this.#key(project, lessonId);
@@ -89,9 +97,11 @@ export class AgentSessions {
     const host = await this.#hostOnce();
     const sessionId = live.sessionId;
     onStart(() => host.cancel(sessionId));
+    live.sink = onEvent;
     try {
       return await host.prompt(sessionId, prompt, onEvent);
     } finally {
+      live.sink = undefined;
       if (!key) live.reg.revoke();
     }
   }

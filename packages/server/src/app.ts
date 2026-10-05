@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { brand } from '@app/brand';
-import { claudeAgent, type AgentSpec, type HostEvent } from '@app/agent-host';
+import { claudeAgent, type AgentSpec } from '@app/agent-host';
 import { AgentHost } from '@app/agent-host';
 import {
   ChangeConflictError,
@@ -28,9 +28,9 @@ import {
 } from '@app/core';
 import { lesson as lessonSchema } from '@app/catalog';
 import { TeacherHttpServer, lessonTarget, lessonsDir, projectTarget, registerLessonValidator } from '@app/teacher-mcp';
-import { AgentSessions, buildAskPrompt, type HostFactory } from './agent-sessions.ts';
+import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
-import { methods, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents } from './protocol.ts';
+import { methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents } from './protocol.ts';
 
 const LEARNER: Author = { kind: 'learner' };
 const SYSTEM: Author = { kind: 'system' };
@@ -285,7 +285,7 @@ export class AppService {
       if (!project) throw new AppError('not_found', `no project ${q.projectId}`);
       const askId = randomUUID();
       const prompt = buildAskPrompt(q);
-      const onEvent = (event: HostEvent) => this.#emit('ask.event', { askId, event });
+      const onEvent = (event: TurnEvent) => this.#emit('ask.event', { askId, event: event as AskEvent });
       void open.agents
         .ask(project, q.lessonId, prompt, onEvent, (cancel) => this.#asks.set(askId, cancel))
         .then(

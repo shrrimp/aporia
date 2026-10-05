@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import type { LearnerForm } from '@app/catalog';
 import {
   band,
   deriveLearnerState,
@@ -18,6 +19,8 @@ export interface TeacherContext {
   readonly agent: Author;
   /** The learner's current review/auto setting. */
   changeMode(): ChangeMode;
+  /** Shows a form to the learner in the app. Absent when no learner interface is attached. */
+  present?(form: LearnerForm): void;
 }
 
 const RULES_DIR = new URL('../rules/', import.meta.url);

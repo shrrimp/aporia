@@ -75,7 +75,11 @@ code { font-family: var(--mono); font-size: 0.86em; }
 .offline { position: fixed; top: 0; left: 0; right: 0; z-index: 20; padding: 0.3rem 1rem; background: #1a1710; color: var(--warn); font-size: 0.85em; border-bottom: 1px solid #2c2618; }
 
 /* ── bar ────────────────────────────────────────────────────────────────── */
-.bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.4rem; border-bottom: 1px solid var(--rule); }
+.bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1.4rem; min-height: 50px; border-bottom: 1px solid var(--rule); -webkit-app-region: drag; user-select: none; }
+.bar button, .bar a, .bar input { -webkit-app-region: no-drag; }
+/* Desktop shell: room for window controls drawn over the bar. */
+:root[data-shell="win32"] .bar { padding-right: 150px; }
+:root[data-shell="darwin"] .bar { padding-left: 84px; }
 .wordmark { font-weight: 500; color: var(--text-strong); letter-spacing: -0.01em; }
 .bar-fill { flex: 1; }
 .crumb { color: var(--text-strong); }
@@ -100,7 +104,7 @@ code { font-family: var(--mono); font-size: 0.86em; }
 .row-sub { grid-column: 1; color: var(--text-soft); font: 0.95rem/1.5 var(--serif); }
 .row-meta { grid-column: 2; grid-row: 1; color: var(--text-faint); font-size: 0.85rem; }
 .profiles .row { grid-template-columns: auto 1fr; align-items: center; }
-.initial { font-family: var(--numeral); color: var(--accent); width: 1.6rem; }
+.initial { font-family: var(--sans); font-weight: 500; color: var(--accent); width: 1.6rem; }
 .row.new { display: block; color: var(--text-soft); }
 .new-profile { display: flex; gap: 0.6rem; align-items: end; margin-bottom: 1rem; }
 .new-profile label { flex: 1; display: grid; gap: 0.35rem; color: var(--text-soft); font-size: 0.9rem; }
@@ -351,6 +355,66 @@ figcaption { font: italic 0.9rem/1.5 var(--serif); color: var(--text-faint); mar
 .proposal-text { margin: 0 0 0.5rem; color: var(--text); }
 .proposal-text .reason { font-family: var(--serif); font-style: italic; color: var(--text-soft); }
 .proposal-actions { display: flex; gap: 0.5rem; }
+
+/* ── forms: how the tutor asks for structured answers ──────────────────── */
+.formcard { margin: 1.4rem 0 0.4rem; padding: 1.2rem 1.3rem 1rem; background: var(--raise); border: 1px solid var(--rule); border-radius: var(--r); font: 15px/1.55 var(--sans); }
+.formcard .md { font-family: var(--sans); }
+.formcard .md-inline, .formcard .md-inline p { display: inline; }
+.f-prompt .md, .f-prompt .md p { color: var(--text-strong); font-size: 1rem; }
+.f-options .md, .f-options .md p { font-size: 0.95rem; }
+.f-intro .md { font-family: var(--serif); }
+.f-title { margin: 0 0 0.3rem; color: var(--text-strong); font-weight: 500; font-size: 1.05rem; }
+.f-intro .md p { font: italic 0.98rem/1.6 var(--serif); color: var(--text-soft); margin: 0 0 0.4rem; }
+.f-questions { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 1.5rem; }
+.f-prompt { display: flex; gap: 0.7rem; align-items: baseline; color: var(--text-strong); margin-bottom: 0.6rem; }
+.f-prompt .num { font-size: 0.8rem; flex: none; }
+.f-body { padding-left: 1.75rem; display: grid; gap: 0.5rem; justify-items: start; }
+.f-body > input, .f-body > textarea { justify-self: stretch; }
+.f-q.unsure .f-prompt { color: var(--text-soft); }
+.f-q.unsure .f-options, .f-q.unsure .f-scale, .f-q.unsure .f-rank, .f-q.unsure > .f-body > input, .f-q.unsure > .f-body > textarea { opacity: 0.35; }
+/* Pixel markers: a square that fills, like a lit pixel. */
+.px { width: 9px; height: 9px; flex: none; border: 1px solid var(--text-faint); display: inline-block; transform: translateY(1px); }
+.f-options.single .px { width: 9px; height: 9px; }
+.f-options { display: grid; gap: 0.15rem; justify-self: stretch; }
+.f-options label, .f-unsure { display: flex; align-items: baseline; gap: 0.7rem; padding: 0.35rem 0.5rem; margin-left: -0.5rem; border-radius: var(--r); cursor: pointer; color: var(--text); position: relative; }
+.f-options label:hover, .f-unsure:hover { background: var(--field); }
+.f-options input, .f-unsure input { position: absolute; opacity: 0; pointer-events: none; }
+.f-options label.on { color: var(--text-strong); }
+.f-options label.on .px, .f-unsure.on .px { background: var(--accent-strong); border-color: var(--accent-strong); box-shadow: 0 0 0 2px var(--raise), 0 0 0 3px rgb(201 213 229 / 0.25); }
+.f-options label:has(input:focus-visible), .f-unsure:has(input:focus-visible), .cells label:has(input:focus-visible) { outline: 1px solid var(--accent); }
+.f-options .other { cursor: text; }
+.other-input { border: 0; border-bottom: 1px solid var(--rule-strong); border-radius: 0; background: none; padding: 0.1rem 0; }
+.other-input:focus { box-shadow: none; }
+.f-unsure { font-size: 0.85rem; color: var(--text-faint); }
+.f-unsure .px { width: 7px; height: 7px; }
+.f-scale { display: flex; align-items: flex-end; gap: 0.9rem; color: var(--text-soft); font-size: 0.85rem; }
+.f-scale .end { padding-bottom: 0.1rem; max-width: 9rem; }
+.cells { display: flex; align-items: flex-end; gap: 4px; }
+.cells label { width: 1.1rem; border: 1px solid var(--rule-strong); cursor: pointer; position: relative; background: transparent; }
+.cells label:hover { border-color: var(--text-faint); }
+.cells label.on { background: var(--accent-strong); border-color: var(--accent-strong); }
+.cells input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.f-rank { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.25rem; justify-self: stretch; }
+.f-rank li { display: flex; gap: 0.8rem; align-items: baseline; padding: 0.35rem 0.6rem; background: var(--field); border-radius: var(--r); }
+.f-rank .rank-label { flex: 1; }
+.f-rank button { font-size: 0.8rem; }
+.f-number { display: inline-flex; align-items: baseline; gap: 0.5rem; }
+.f-number input { width: 8rem; }
+.f-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 1.4rem; padding-top: 0.9rem; border-top: 1px solid var(--rule); }
+.f-progress { color: var(--text-faint); font-size: 0.85rem; }
+.formcard.sent { background: transparent; border-color: var(--rule); }
+.formcard.sent dl { margin: 0.6rem 0 0; display: grid; gap: 0.5rem; }
+.formcard.sent dt { color: var(--text-soft); font-size: 0.9rem; }
+.formcard.sent dt .num { font-size: 0.75rem; margin-right: 0.3rem; }
+.formcard.sent dd { margin: 0.1rem 0 0 1.8rem; color: var(--text-strong); font-family: var(--serif); }
+.question.answered { color: var(--text-soft); font-style: italic; font-family: var(--serif); }
+.conversation.chat .formcard { padding: 1rem; }
+.conversation.chat .f-body { padding-left: 0; }
+
+/* The wordmark: pixels like the mark, in the bar. */
+.wordmark-svg { display: block; shape-rendering: crispEdges; }
+.pixelmark { shape-rendering: crispEdges; }
+.bar .wordmark-svg rect { fill: var(--text-strong); }
 
 /* ── history and you ────────────────────────────────────────────────────── */
 .history ol { list-style: none; padding: 0; margin: 0; }

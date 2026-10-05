@@ -14,6 +14,7 @@ export interface Activity {
 const TEACHING: Readonly<Record<string, Activity>> = {
   get_teaching_context: { label: 'Reading your learner profile', kind: 'context' },
   get_component_catalog: { label: 'Checking the lesson toolkit', kind: 'context' },
+  ask_learner: { label: 'Preparing questions for you', kind: 'context' },
   record_evidence: { label: 'Noting what you showed', kind: 'note' },
   record_instruction: { label: 'Marking what was taught', kind: 'note' },
   record_insight: { label: 'Noting how you learn', kind: 'note' },

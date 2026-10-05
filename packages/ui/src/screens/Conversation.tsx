@@ -5,6 +5,8 @@ import { Markdown } from '../lesson/Markdown.tsx';
 import { PixelMark } from '../PixelMark.tsx';
 import { describeTool } from './activity.ts';
 import { Proposals } from './Proposals.tsx';
+import { FormCard } from './FormCard.tsx';
+import type { FormAnswer, LearnerForm } from '@app/catalog';
 
 interface Step {
   readonly id: string;
@@ -16,6 +18,9 @@ interface Turn {
   readonly askId?: string;
   readonly question: string;
   readonly selection?: string;
+  /** Set when this message carries answers to a form: shown compactly. */
+  readonly answersTo?: string;
+  forms: { form: LearnerForm; submitted?: Record<string, FormAnswer> }[];
   answer: string;
   steps: Step[];
   blocked: string[];
@@ -107,7 +112,7 @@ export function Conversation({
     setTurns((ts) =>
       ts.map((t) => {
         if (t.askId !== askId) return t;
-        const copy: Turn = { ...t, steps: t.steps.map((s) => ({ ...s })), blocked: [...t.blocked] };
+        const copy: Turn = { ...t, steps: t.steps.map((s) => ({ ...s })), blocked: [...t.blocked], forms: [...t.forms] };
         f(copy);
         return copy;
       }),
@@ -121,6 +126,7 @@ export function Conversation({
         update(askId, (t) => {
           const e = event as AskEvent;
           if (e.kind === 'text') t.answer += e.text;
+          else if (e.kind === 'form') t.forms.push({ form: e.form });
           else if (e.kind === 'tool') {
             const s = t.steps.find((x) => x.id === e.id);
             if (!s) t.steps.push({ id: e.id, ...(e.title ? { title: e.title } : {}), ...(e.status ? { status: e.status } : {}) });
@@ -151,8 +157,17 @@ export function Conversation({
   );
 
   const send = useCallback(
-    async (question: string, sel?: { text: string; anchor?: string }) => {
-      const pending: Turn = { question, ...(sel ? { selection: sel.text } : {}), answer: '', steps: [], blocked: [], state: 'running' };
+    async (question: string, sel?: { text: string; anchor?: string }, answersTo?: string) => {
+      const pending: Turn = {
+        question,
+        ...(sel ? { selection: sel.text } : {}),
+        ...(answersTo ? { answersTo } : {}),
+        answer: '',
+        steps: [],
+        blocked: [],
+        forms: [],
+        state: 'running',
+      };
       onActivity();
       try {
         const { askId } = await rpc.call('ask', {
@@ -216,7 +231,7 @@ export function Conversation({
             <div className="you">
               <p className="who">You</p>
               {t.selection && <blockquote className="quote">{t.selection}</blockquote>}
-              <p className="question">{t.question}</p>
+              {t.answersTo ? <p className="question answered">Sent my answers to “{t.answersTo}”</p> : <p className="question">{t.question}</p>}
             </div>
             <div className="tutor-says">
               <p className="who">
@@ -233,6 +248,19 @@ export function Conversation({
                 <Steps steps={t.steps} blocked={t.blocked} />
               )}
               {t.answer && <Markdown md={t.answer} />}
+              {t.forms.map((f, fi) => (
+                <FormCard
+                  key={fi}
+                  form={f.form}
+                  submitted={f.submitted}
+                  onSubmit={(message, answers) => {
+                    setTurns((ts) =>
+                      ts.map((x) => (x === t ? { ...x, forms: x.forms.map((y, yi) => (yi === fi ? { ...y, submitted: answers } : y)) } : x)),
+                    );
+                    void send(message, undefined, f.form.title);
+                  }}
+                />
+              ))}
               {t.state === 'error' && (
                 <p className="error" role="alert">
                   {t.error}
