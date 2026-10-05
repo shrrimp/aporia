@@ -66,7 +66,7 @@ describe('Conversation', () => {
     expect(screen.getByText(/won't write your solution/)).toBeInTheDocument();
     await user.type(screen.getByLabelText('Your question'), 'why?');
     await user.keyboard('{Control>}{Enter}{/Control}');
-    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'why?', lessonId: 'l' });
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'why?', lessonId: 'l', thread: 'chat' });
     expect(await screen.findByText('Thinking…')).toBeInTheDocument();
     act(() => r.emit('ask.event', { askId: 'a1', event: { kind: 'tool', id: 't1', title: 'Read /ws/Joint.cpp', status: 'pending' } }));
     expect(screen.getByText('Reading your code…')).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe('Conversation', () => {
     expect(screen.getByText('frames')).toBeInTheDocument();
     const steps = screen.getByRole('list', { name: 'What your tutor did' });
     expect(steps).toHaveTextContent('Reading your codeJoint.cpp');
-    expect(steps).toHaveTextContent('Noting what you showeddid not go through');
+    expect(steps).toHaveTextContent("Noting what you showeddidn't work");
     expect(steps).toHaveTextContent('Blocked by the appwriting solution.cpp');
     expect(steps).toHaveTextContent('Blocked by the appreading passwd');
     await user.click(screen.getByRole('button', { name: 'Stop' }));
@@ -118,7 +118,7 @@ describe('Conversation', () => {
     const r = base();
     const activity: number[] = [];
     const { rerender } = mount(r, <Conversation variant="chat" projectId="p" lessonId="l" request={{ question: 'hint please', selection: 'sel', anchor: 'a', nonce: 1 }} onActivity={() => activity.push(1)} />);
-    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'hint please', lessonId: 'l', selection: 'sel', anchor: 'a' });
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'hint please', lessonId: 'l', selection: 'sel', anchor: 'a', thread: 'chat' });
     rerender(
       <RpcProvider client={r.asClient()}>
         <Conversation variant="chat" projectId="p" lessonId="l" request={{ question: '', selection: 'just this', anchor: 'b', nonce: 2 }} onActivity={() => activity.push(2)} />
@@ -128,6 +128,33 @@ describe('Conversation', () => {
     await user.click(screen.getByRole('button', { name: 'Remove selection' }));
     expect(screen.queryByText(/“just this”/)).toBeNull();
     expect(activity).toEqual([1, 2]);
+  });
+
+  it('sends each request once, even when the lesson changes under it (regression: re-interview after accepting)', async () => {
+    const r = base();
+    const req = { question: 'Interview me', nonce: 7 };
+    const { rerender } = mount(r, <Conversation projectId="p" lessonId={undefined} request={req} />);
+    await screen.findByText('Interview me');
+    rerender(
+      <RpcProvider client={r.asClient()}>
+        <Conversation projectId="p" lessonId="the-new-lesson" request={req} />
+      </RpcProvider>,
+    );
+    await new Promise((res) => setTimeout(res, 20));
+    expect(r.calls.filter((c) => c.method === 'ask')).toHaveLength(1);
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ thread: 'session' });
+  });
+
+  it('labels a failed step "needed another try" when the tutor retried it', () => {
+    const r = base();
+    mount(r, <Conversation projectId="p" lessonId="l" request={{ question: 'q', nonce: 1 }} />);
+    return screen.findByText('q').then(() => {
+      act(() => {
+        r.emit('ask.event', { askId: 'a1', event: { kind: 'tool', id: 'd1', title: 'mcp__aporia__draft_lesson', status: 'failed' } });
+        r.emit('ask.event', { askId: 'a1', event: { kind: 'tool', id: 'd2', title: 'mcp__aporia__draft_lesson', status: 'completed' } });
+      });
+      expect(screen.getByRole('list', { name: 'What your tutor did' })).toHaveTextContent('Writing a lessonneeded another try');
+    });
   });
 
   it('reports failures to start a question', async () => {

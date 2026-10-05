@@ -213,7 +213,7 @@ describe('misc branches', () => {
     expect(r.calls.some((c) => c.method === 'ask')).toBe(false); // empty question is not sent
     await user.type(screen.getByLabelText('Your question'), 'q');
     await user.click(screen.getByRole('button', { name: 'Send' }));
-    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'q', selection: 'x'.repeat(200) });
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'q', selection: 'x'.repeat(200), thread: 'chat' });
   });
 
   it('home lists projects and creates one without coding fields', async () => {

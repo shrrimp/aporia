@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { lesson as lessonSchema } from '@app/catalog';
+import { lesson as lessonSchema, normalizeLesson } from '@app/catalog';
 import type { ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc } from '../hooks.tsx';
 import { LessonView } from '../lesson/LessonView.tsx';
@@ -26,7 +26,7 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
   const current = lessonId ?? lessons.data?.[0]?.id;
   const currentTitle = lessons.data?.find((l) => l.id === current)?.title;
   const lessonDoc = useQuery('lessons.get', current ? { projectId: project.id, lessonId: current } : null, ['lessons']);
-  const parsed = useMemo(() => (lessonDoc.data ? lessonSchema.safeParse(lessonDoc.data) : undefined), [lessonDoc.data]);
+  const parsed = useMemo(() => (lessonDoc.data ? lessonSchema.safeParse(normalizeLesson(lessonDoc.data)) : undefined), [lessonDoc.data]);
   const [view, setView] = useState<View>();
   // Until the learner chooses, a project without lessons opens on the session page.
   const shown: View = view ?? (lessons.data && lessons.data.length === 0 ? 'session' : 'lesson');

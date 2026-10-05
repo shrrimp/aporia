@@ -40,10 +40,11 @@ export class AgentSessions {
     this.#settings = settings;
   }
 
-  #key(project: ProjectDTO, lessonId: string | undefined): string | undefined {
-    switch (this.#settings().sessionMode) {
-      case 'interaction':
-        return undefined;
+  #key(project: ProjectDTO, lessonId: string | undefined, thread: 'chat' | 'session'): string | undefined {
+    const mode = this.#settings().sessionMode;
+    if (mode === 'interaction') return undefined;
+    if (thread === 'session') return `${project.id}/~session`;
+    switch (mode) {
       case 'lesson':
         return `${project.id}/${lessonId ?? '-'}`;
       case 'permanent':
@@ -84,11 +85,12 @@ export class AgentSessions {
   async ask(
     project: ProjectDTO,
     lessonId: string | undefined,
+    thread: 'chat' | 'session',
     prompt: string,
     onEvent: (e: TurnEvent) => void,
     onStart: (cancel: () => Promise<void>) => void,
   ): Promise<string> {
-    const key = this.#key(project, lessonId);
+    const key = this.#key(project, lessonId, thread);
     let live = key ? this.#live.get(key) : undefined;
     if (!live) {
       live = await this.#open(project);

@@ -45,15 +45,17 @@ function Steps({ steps, blocked }: { steps: readonly Step[]; blocked: readonly s
   if (steps.length === 0 && blocked.length === 0) return null;
   return (
     <ul className="steps" aria-label="What your tutor did">
-      {steps.map((s) => {
+      {steps.map((s, i) => {
         const a = describeTool(s.title);
         const state = STEP_STATE[s.status ?? ''] ?? 'working';
+        // A failed call is usually the tutor's own input being rejected and fixed on the next try.
+        const retried = state === 'failed' && steps.slice(i + 1).some((later) => describeTool(later.title).label === a.label);
         return (
           <li key={s.id} className={`step kind-${a.kind} step-${state}`}>
             <span className="step-mark" aria-hidden />
             <span className="step-label">{a.label}</span>
             {a.detail && <span className="step-detail">{a.detail}</span>}
-            {state === 'failed' && <span className="step-state">did not go through</span>}
+            {state === 'failed' && <span className="step-state">{retried ? 'needed another try' : "didn't work"}</span>}
           </li>
         );
       })}
@@ -106,6 +108,8 @@ export function Conversation({
   const [input, setInput] = useState('');
   const [selection, setSelection] = useState<{ text: string; anchor?: string }>();
   const endRef = useRef<HTMLDivElement>(null);
+  /** The last request handled: each request is acted on exactly once, whatever else re-renders. */
+  const handled = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const update = useCallback((askId: string, f: (t: Turn) => void) => {
@@ -176,17 +180,19 @@ export function Conversation({
           ...(lessonId ? { lessonId } : {}),
           ...(sel ? { selection: sel.text } : {}),
           ...(sel?.anchor ? { anchor: sel.anchor } : {}),
+          thread: variant === 'chat' ? 'chat' : 'session',
         });
         setTurns((ts) => [...ts, { ...pending, askId }]);
       } catch (err) {
         setTurns((ts) => [...ts, { ...pending, state: 'error', error: (err as Error).message }]);
       }
     },
-    [rpc, projectId, lessonId, onActivity],
+    [rpc, projectId, lessonId, onActivity, variant],
   );
 
   useEffect(() => {
-    if (!request) return;
+    if (!request || handled.current === request.nonce) return;
+    handled.current = request.nonce;
     const sel = request.selection ? { text: request.selection, ...(request.anchor ? { anchor: request.anchor } : {}) } : undefined;
     if (request.question) void send(request.question, sel);
     else if (sel) {

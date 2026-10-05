@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { brand } from '@app/brand';
-import { catalogGuide, formProblems, learnerForm, validateLesson, type Problem } from '@app/catalog';
+import { catalogGuide, formProblems, learnerForm, normalizeLesson, validateLesson, type Problem } from '@app/catalog';
 import {
+  applyPatch,
   ChangeError,
   ChangeValidationError,
   difficultyFromLevel,
@@ -69,10 +70,12 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
         'Show the learner a form instead of asking in prose, whenever you need several answers or an answer with a shape ' +
         '(choices, numbers, a 1–5 scale, a ranking, short answers). Use it for the interview and for diagnostic probes. ' +
         'Keep each form short (3–6 questions). After calling it, end your turn: the answers arrive as the next message.',
-      inputSchema: { form: learnerForm },
+      // Flat on purpose: deeply nested tool input with long text is where models emit broken JSON.
+      inputSchema: learnerForm.shape,
     },
-    async ({ form }) =>
+    async (fields) =>
       guard(async () => {
+        const form = learnerForm.parse(fields);
         const problems = formProblems(form);
         if (problems.length) return fail(`Fix the form:\n${problems.map((p) => `- ${p}`).join('\n')}`);
         if (!ctx.present) return fail('No learner interface is attached; ask in plain text instead.');
@@ -161,7 +164,7 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
         const target = lessonTarget(ctx.projectId, r.lesson.id);
         const exists = (await changes.read(target)) !== null;
         const change = await changes.propose(
-          { author: ctx.agent, target, reason, patch: [{ op: exists ? 'replace' : 'add', path: '', value: lesson as JsonValue }] },
+          { author: ctx.agent, target, reason, patch: [{ op: exists ? 'replace' : 'add', path: '', value: normalizeLesson(lesson) as JsonValue }] },
           ctx.changeMode(),
         );
         return ok(
@@ -184,7 +187,25 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
     async ({ lessonId, patch, reason }) =>
       guard(async () => {
         const target = lessonTarget(ctx.projectId, lessonId);
-        if ((await changes.read(target)) === null) return fail(`No lesson "${lessonId}".`);
+        if ((await changes.read(target)) === null) {
+          // Not applied yet: maybe it is a draft waiting for review. Then fold the revision into
+          // that proposal, so the learner still approves one complete lesson.
+          const pending = changes.list({ status: 'proposed', target }).at(-1);
+          if (!pending) return fail(`No lesson "${lessonId}".`);
+          const draft = applyPatch(null, pending.patch).doc;
+          let revised: JsonValue;
+          try {
+            revised = applyPatch(draft, patch).doc;
+          } catch (err) {
+            return fail(`cannot apply to the draft: ${(err as Error).message}`);
+          }
+          const change = await changes.propose(
+            { author: ctx.agent, target, reason: `${pending.reason}; ${reason}`, patch: [{ op: 'add', path: '', value: normalizeLesson(revised) as JsonValue }] },
+            ctx.changeMode(),
+          );
+          await changes.reject(pending.changeId, ctx.agent, `superseded by ${change.changeId}`);
+          return ok(`The draft waiting for review now includes this revision (change ${change.changeId} replaces ${pending.changeId}).`);
+        }
         const change = await changes.propose({ author: ctx.agent, target, reason, patch }, ctx.changeMode());
         return ok(`Revision ${change.status === 'applied' ? 'applied' : 'proposed for review'} (change ${change.changeId}).`);
       }),

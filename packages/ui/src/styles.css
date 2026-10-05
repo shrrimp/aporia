@@ -329,7 +329,8 @@ figcaption { font: italic 0.9rem/1.5 var(--serif); color: var(--text-faint); mar
 .step-working .step-mark { animation: step-blink 0.9s steps(2, jump-none) infinite; }
 @keyframes step-blink { 50% { opacity: 0.25; } }
 .step-done { color: var(--text-faint); }
-.step-failed .step-label, .step-failed .step-state { color: var(--warn); }
+.step-failed .step-label { color: var(--text-faint); }
+.step-failed .step-state { color: var(--warn); font-size: 0.78rem; }
 .step-detail { font-family: var(--mono); font-size: 0.78rem; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 22rem; }
 .step-state { font-size: 0.78rem; }
 .compose { position: sticky; bottom: 0; background: var(--bg); padding: 1rem 0 1.4rem; border-top: 1px solid var(--rule); display: grid; gap: 0.6rem; }

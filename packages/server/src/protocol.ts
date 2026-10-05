@@ -89,6 +89,12 @@ export const askInput = z.strictObject({
   /** Text the learner selected. */
   selection: z.string().max(4000).optional(),
   question: z.string().trim().min(1).max(4000),
+  /**
+   * Which conversation this belongs to. "chat": quick questions, one agent session per lesson
+   * (per the learner's setting). "session": the interview and planning page, one agent session
+   * per project whatever lesson is open, so it remembers what was already discussed.
+   */
+  thread: z.enum(['chat', 'session']).default('chat'),
 });
 
 /** Every method: params schema + result type. */

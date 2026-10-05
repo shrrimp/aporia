@@ -221,7 +221,7 @@ describe('asking the agent', () => {
   it('forwards forms from the teaching tools to the UI, and answers go back as the next question', async () => {
     const c = await client();
     const { project } = await withProject(c);
-    const r = await c.call('ask', { projectId: project.id, question: 'Interview me briefly to find out what I already know' });
+    const r = await c.call('ask', { projectId: project.id, question: 'Interview me briefly to find out what I already know', thread: 'session' });
     const form = await c.waitFor((e) => e.event === 'ask.event' && e.data.askId === r.askId && e.data.event.kind === 'form');
     expect(form.data.event.form).toMatchObject({ title: 'Where you are starting from' });
     await c.waitFor((e) => e.event === 'ask.done' && e.data.askId === r.askId);
@@ -260,6 +260,24 @@ describe('asking the agent', () => {
     const [newer, older] = (await c.call('history.list', { filter: { authorKind: 'agent' } })).filter((h) => h.kind === 'change');
     await expect(c.call('history.undo', { id: older!.id })).rejects.toMatchObject({ code: 'dependants', data: { dependants: [newer!.id] } });
     expect((await c.call('history.undo', { id: older!.id, withDependants: true })).undone).toEqual([newer!.id, older!.id]);
+  });
+
+  it('keeps one session-page agent per project whatever lesson is open (regression: re-interview)', async () => {
+    const c = await client();
+    const { project } = await withProject(c);
+    const ask = async (thread: 'chat' | 'session', lessonId?: string) => {
+      const r = await c.call('ask', { projectId: project.id, question: 'hi', thread, ...(lessonId ? { lessonId } : {}) });
+      await c.waitFor((e) => e.event === 'ask.done' && e.data.askId === r.askId);
+    };
+    await ask('session');
+    await ask('session', 'l1');
+    await ask('session', 'l2');
+    expect(log.sessions).toBe(1);
+    await ask('chat', 'l1');
+    expect(log.sessions).toBe(2);
+    await c.call('profiles.updateSettings', { sessionMode: 'interaction' });
+    await ask('session');
+    expect(log.sessions).toBe(3);
   });
 
   it('reuses sessions per lesson, opens fresh ones per interaction', async () => {

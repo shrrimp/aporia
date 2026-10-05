@@ -66,7 +66,6 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }): a
             mcp.callTool({
               name: 'ask_learner',
               arguments: {
-                form: {
                   title: 'Where you are starting from',
                   intro: 'No wrong answers here: this only decides where the first lesson begins.',
                   questions: [
@@ -77,7 +76,6 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }): a
                     { id: 'order', kind: 'rank', prompt: 'Order what matters most to you right now:', options: ['Understanding the maths', 'Working code fast', 'Avoiding numerical drift'] },
                   ],
                   submitLabel: 'Send answers',
-                },
               },
             }),
           );

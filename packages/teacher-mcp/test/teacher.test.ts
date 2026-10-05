@@ -110,15 +110,15 @@ describe('teacher MCP server', () => {
     const reg2 = server.register({ profile, projectId: 'hmp', agent, changeMode: () => mode, present: (f) => shown.push(f) });
     const c2 = await connect(reg2.token);
     const form = { title: 'Start', questions: [{ id: 'q1', kind: 'single', prompt: 'Which?', options: ['a', 'b'] }] };
-    const r = await c2.callTool({ name: 'ask_learner', arguments: { form } });
+    const r = await c2.callTool({ name: 'ask_learner', arguments: form });
     expect(text(r)).toMatch(/now in front of the learner. End your turn/);
     expect(shown).toEqual([expect.objectContaining({ title: 'Start' })]);
-    const dup = await c2.callTool({ name: 'ask_learner', arguments: { form: { ...form, questions: [form.questions[0], form.questions[0]] } } });
+    const dup = await c2.callTool({ name: 'ask_learner', arguments: { ...form, questions: [form.questions[0], form.questions[0]] } });
     expect(dup.isError).toBe(true);
     expect(text(dup)).toMatch(/duplicate question id/);
     await c2.close();
     // The default context has no interface attached.
-    const none = await call('ask_learner', { form });
+    const none = await call('ask_learner', form);
     expect(none.isError).toBe(true);
     expect(text(none)).toMatch(/No learner interface/);
   });
@@ -176,6 +176,48 @@ describe('teacher MCP server', () => {
     expect(text(r)).toMatch(/Rejected; fix these/);
     const noWarmup = { ...fourNumbers, sections: fourNumbers.sections.filter((s) => s.role !== 'warmup') };
     expect(text(await call('draft_lesson', { lesson: noWarmup }))).toMatch(/Composition advice:[\s\S]*no warm-up/);
+  });
+
+  it('stores lessons normalized even when the agent mixes up "type" and "kind"', async () => {
+    const lesson = structuredClone(fourNumbers) as unknown as { sections: { blocks: Record<string, unknown>[] }[] };
+    const first = lesson.sections[0]!.blocks[0]!;
+    lesson.sections[0]!.blocks[0] = { kind: first['type'], ...Object.fromEntries(Object.entries(first).filter(([k]) => k !== 'type')) };
+    expect(text(await call('draft_lesson', { lesson }))).toMatch(/saved/);
+    const stored = JSON.parse(text(await call('get_lesson', { lessonId: 'hmp-09-four-numbers' })));
+    expect(stored.sections[0].blocks[0]).toMatchObject({ type: 'drill' });
+    expect(stored.sections[0].blocks[0]).not.toHaveProperty('kind');
+  });
+
+  it('folds a revision of a draft waiting for review into that same proposal (regression)', async () => {
+    mode = 'review';
+    await call('draft_lesson', { lesson: fourNumbers });
+    const [first] = profile.changes.list({ status: 'proposed' });
+    const r = await call('revise_lesson', {
+      lessonId: 'hmp-09-four-numbers',
+      reason: 'clearer title',
+      patch: [{ op: 'replace', path: '/title', value: 'Four Numbers, Three Speeds (rev)' }],
+    });
+    expect(text(r)).toMatch(/draft waiting for review now includes this revision/);
+    const pending = profile.changes.list({ status: 'proposed' });
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.reason).toBe('new lesson; clearer title');
+    expect(profile.changes.get(first!.changeId)!.status).toBe('rejected');
+    await profile.changes.accept(pending[0]!.changeId, { kind: 'learner' });
+    expect(JSON.parse(text(await call('get_lesson', { lessonId: 'hmp-09-four-numbers' }))).title).toBe('Four Numbers, Three Speeds (rev)');
+  });
+
+  it('refuses revisions that do not fit the pending draft, keeping it intact', async () => {
+    mode = 'review';
+    await call('draft_lesson', { lesson: fourNumbers });
+    const bad = await call('revise_lesson', { lessonId: 'hmp-09-four-numbers', reason: 'x', patch: [{ op: 'remove', path: '/nope' }] });
+    expect(text(bad)).toMatch(/cannot apply to the draft/);
+    const leak = await call('revise_lesson', {
+      lessonId: 'hmp-09-four-numbers',
+      reason: 'x',
+      patch: [{ op: 'replace', path: '/sections/3/blocks/1/source', value: 'void f() {\n  q = normalize(q * dq);\n}' }],
+    });
+    expect(leak.isError).toBe(true);
+    expect(profile.changes.list({ status: 'proposed' })).toHaveLength(1);
   });
 
   it('in review mode, drafts wait for the learner', async () => {

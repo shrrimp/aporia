@@ -26,7 +26,7 @@ import {
   type OpenProfile,
   type ProfileFile,
 } from '@app/core';
-import { lesson as lessonSchema } from '@app/catalog';
+import { lesson as lessonSchema, normalizeLesson } from '@app/catalog';
 import { TeacherHttpServer, lessonTarget, lessonsDir, projectTarget, registerLessonValidator } from '@app/teacher-mcp';
 import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
@@ -195,7 +195,7 @@ export class AppService {
       const targets = [...new Set(profile.changes.list({ status: 'applied' }).map((c) => c.target))].filter((t) => t.startsWith(prefix)).sort();
       const out = [];
       for (const t of targets) {
-        const l = lessonSchema.safeParse(await profile.changes.read(t));
+        const l = lessonSchema.safeParse(normalizeLesson(await profile.changes.read(t)));
         if (l.success) out.push({ id: l.data.id, title: l.data.title, kind: l.data.kind, estimateMin: l.data.estimateMin });
       }
       return out;
@@ -287,7 +287,7 @@ export class AppService {
       const prompt = buildAskPrompt(q);
       const onEvent = (event: TurnEvent) => this.#emit('ask.event', { askId, event: event as AskEvent });
       void open.agents
-        .ask(project, q.lessonId, prompt, onEvent, (cancel) => this.#asks.set(askId, cancel))
+        .ask(project, q.lessonId, q.thread, prompt, onEvent, (cancel) => this.#asks.set(askId, cancel))
         .then(
           (stopReason) => this.#emit('ask.done', { askId, stopReason }),
           (err: unknown) => this.#emit('ask.error', { askId, message: (err as Error).message }),
