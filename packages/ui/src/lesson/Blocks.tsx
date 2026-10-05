@@ -165,7 +165,12 @@ function Task({ doc }: { doc: Of<'task'> }) {
       )}
       {doc.checkpoint && (
         <p className="checkpoint">
-          Checkpoint: about <strong>{doc.checkpoint.expect.passed} / {doc.checkpoint.expect.of}</strong> checks in <code>{doc.checkpoint.suite}</code> should pass when this step is done.
+          <span className="lcd counter">
+            {doc.checkpoint.expect.passed}/{doc.checkpoint.expect.of}
+          </span>
+          <span>
+            checks in <code>{doc.checkpoint.suite}</code> should pass when this step is done.
+          </span>
         </p>
       )}
       <button type="button" className="hint" onClick={() => actions.ask(`I'm stuck on task "${doc.title}". Give me the lowest hint level that helps.`, { anchor: `task:${doc.id}` })}>

@@ -15,12 +15,12 @@ const app = await electron.launch({
 });
 try {
   const page = await app.firstWindow();
-  await page.getByText('Who is learning?').waitFor({ timeout: 15_000 });
+  await page.getByRole('heading', { name: 'Who is learning?' }).waitFor({ timeout: 15_000 });
   const connection = await page.evaluate(() => (window as unknown as { __APP_CONNECTION__?: { url: string } }).__APP_CONNECTION__);
   if (!connection?.url.startsWith('http://127.0.0.1:')) throw new Error('preload did not provide the connection');
   await page.getByPlaceholder('Your name').fill('Smoke');
   await page.getByRole('button', { name: 'Create' }).click();
-  await page.getByText('Your projects').waitFor();
+  await page.getByRole('heading', { name: 'Your projects.' }).waitFor();
   await page.getByRole('button', { name: '+ Start a new project' }).click();
   await page.getByLabel(/What do you want/).fill('Smoke project');
   await page.getByLabel('Describe the goal').fill('Check the shell works');

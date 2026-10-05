@@ -66,7 +66,8 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
   return (
     <div className="project">
       <header className="topbar">
-        <button type="button" onClick={onBack}>← Projects</button>
+        <button type="button" className="ghost" onClick={onBack}>← Projects</button>
+        <span className="logo" aria-hidden>a</span>
         <span className="project-title">{project.title}</span>
         <nav>
           <button type="button" aria-pressed={side === 'me'} onClick={() => setSide(side === 'me' ? 'none' : 'me')}>Me</button>

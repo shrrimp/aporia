@@ -89,6 +89,7 @@ export function AskPanel({ projectId, lessonId, request }: { projectId: string; 
   return (
     <aside className={`ask ${open ? 'open' : 'closed'}`} aria-label="Ask your tutor">
       <button type="button" className="ask-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className={`dot ${running ? 'live' : ''}`} aria-hidden />
         {open ? 'Tutor' : 'Ask your tutor'} {running ? '· thinking…' : ''}
       </button>
       {open && (

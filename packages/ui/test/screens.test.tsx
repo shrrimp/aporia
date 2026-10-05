@@ -50,7 +50,7 @@ describe('App flow', () => {
     expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '← Projects' }));
     await user.click(await screen.findByRole('button', { name: /switch/ }));
-    expect(await screen.findByText('Who is learning?')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Who is learning?' })).toBeInTheDocument();
   });
 
   it('shows connection status changes', async () => {

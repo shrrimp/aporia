@@ -15,8 +15,14 @@ export function ProfilePicker({ onOpen }: { onOpen: (p: ProfileDTO) => void }) {
     }
   };
   return (
-    <main className="screen center">
-      <h1>Who is learning?</h1>
+    <main className="screen center hero">
+      <p className="badge-pill">
+        <span className="dot" aria-hidden />
+        Local, private, yours
+      </p>
+      <h1 className="headline">
+        Who is <em className="hl">learning?</em>
+      </h1>
       <ul className="profiles">
         {profiles.data?.map((p) => (
           <li key={p.id}>
@@ -44,7 +50,7 @@ export function ProfilePicker({ onOpen }: { onOpen: (p: ProfileDTO) => void }) {
           New profile
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" maxLength={60} />
         </label>
-        <button type="submit" disabled={name.trim() === ''}>Create</button>
+        <button type="submit" className="primary" disabled={name.trim() === ''}>Create</button>
       </form>
       <p className="hint">
         Each profile is a separate folder on this computer. People who share an OS account can read each other's files unless profiles are encrypted.
