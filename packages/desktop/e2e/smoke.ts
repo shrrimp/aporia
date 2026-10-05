@@ -26,6 +26,8 @@ try {
   await page.getByLabel('Describe the goal').fill('Check the shell works');
   await page.getByRole('button', { name: 'Create project' }).click();
   await page.getByRole('button', { name: 'Start the interview' }).waitFor();
+  const hasMenu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu() !== null);
+  if (process.platform !== 'darwin' && hasMenu) throw new Error('the native menu bar should be gone');
   const nodeIntegration = await page.evaluate(() => typeof (globalThis as { require?: unknown }).require);
   if (nodeIntegration !== 'undefined') throw new Error('renderer can reach Node');
   if (process.argv[2]) await page.screenshot({ path: process.argv[2] });

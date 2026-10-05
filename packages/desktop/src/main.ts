@@ -1,4 +1,4 @@
-import { BrowserWindow, app, ipcMain, shell } from 'electron';
+import { BrowserWindow, Menu, app, ipcMain, shell } from 'electron';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,10 +29,26 @@ async function start(): Promise<void> {
     event.returnValue = isOwnPage(event.senderFrame?.url ?? '') ? { url: served!.url, token: served!.token } : null;
   });
 
+  // No native menu bar: the app has its own bar. macOS keeps a minimal menu so the standard
+  // shortcuts (copy, paste, quit, hide) keep working.
+  Menu.setApplicationMenu(
+    process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null,
+  );
+  // On Windows and macOS the title bar merges into the app's bar; on Linux the window manager decides.
+  const integratedTitleBar =
+    process.platform === 'win32'
+      ? { titleBarStyle: 'hidden' as const, titleBarOverlay: { color: '#070708', symbolColor: '#9399a3', height: 50 } }
+      : process.platform === 'darwin'
+        ? { titleBarStyle: 'hiddenInset' as const }
+        : {};
+
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     title: brand.displayName,
+    backgroundColor: '#070708',
+    autoHideMenuBar: true,
+    ...integratedTitleBar,
     show: false,
     webPreferences: {
       preload: path.join(here, 'preload.cjs'),

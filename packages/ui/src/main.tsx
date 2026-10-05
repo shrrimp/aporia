@@ -13,12 +13,15 @@ declare global {
   interface Window {
     /** Set by the desktop shell's preload script. */
     __APP_CONNECTION__?: { url: string; token: string };
+    /** Set by the desktop shell: which OS draws window controls over the app's bar. */
+    __APP_SHELL__?: { platform: string };
   }
 }
 
 // The UI's CSP forbids eval; tell zod not to probe for it.
 z.config({ jitless: true });
 document.title = brand.displayName;
+if (window.__APP_SHELL__) document.documentElement.dataset['shell'] = window.__APP_SHELL__.platform;
 const root = createRoot(document.getElementById('root')!);
 const url = connectionFromLocation(window.location, window.__APP_CONNECTION__);
 if (!url) {
