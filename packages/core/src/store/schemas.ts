@@ -111,6 +111,21 @@ export const revokeEvent = z.strictObject({
   reason: z.string().max(1000).optional(),
 });
 
+/**
+ * Where the learner is inside a lesson: an answer given, a prediction committed, a task marked
+ * done, the section last read. The latest value per key wins. Not evidence (that is recorded
+ * separately); just so nothing is lost when the app closes.
+ */
+export const progressEvent = z.strictObject({
+  ...base,
+  id: idOf('ev'),
+  type: z.literal('progress'),
+  projectId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  lessonId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  key: z.string().min(1).max(200),
+  value: jsonValue.refine((v) => JSON.stringify(v).length <= 20_000, { message: 'progress value too large' }),
+});
+
 const changeBase = { ...base, id: idOf('ev'), changeId: idOf('chg') };
 
 export const changeProposed = z.strictObject({
@@ -140,6 +155,7 @@ export const logEvent = z.discriminatedUnion('type', [
   instructionEvent,
   insightObservation,
   revokeEvent,
+  progressEvent,
   changeProposed,
   changeApplied,
   changeClosed,
@@ -149,6 +165,7 @@ export type EvidenceEvent = z.output<typeof evidenceEvent>;
 export type InstructionEvent = z.output<typeof instructionEvent>;
 export type InsightObservation = z.output<typeof insightObservation>;
 export type RevokeEvent = z.output<typeof revokeEvent>;
+export type ProgressEvent = z.output<typeof progressEvent>;
 export type ChangeProposed = z.output<typeof changeProposed>;
 export type ChangeApplied = z.output<typeof changeApplied>;
 export type ChangeClosed = z.output<typeof changeClosed>;

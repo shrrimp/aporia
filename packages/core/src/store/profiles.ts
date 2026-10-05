@@ -7,6 +7,7 @@ import { resolveInside } from '../fs/safe-path.ts';
 import { migrate, type Migration } from './migrations.ts';
 import { Journal } from './journal.ts';
 import { Observations } from './observations.ts';
+import { Progress } from './progress.ts';
 import { ChangeService } from '../changes/change-service.ts';
 import { systemClock, type Clock } from '../clock.ts';
 import { isoDate } from './schemas.ts';
@@ -41,6 +42,7 @@ export interface OpenProfile {
   readonly dir: string;
   readonly journal: Journal;
   readonly observations: Observations;
+  readonly progress: Progress;
   readonly changes: ChangeService;
   close(): Promise<void>;
 }
@@ -122,6 +124,7 @@ export class ProfileStore {
         dir,
         journal,
         observations: new Observations(journal),
+        progress: new Progress(journal),
         changes,
         close: () => lock.release(),
       };

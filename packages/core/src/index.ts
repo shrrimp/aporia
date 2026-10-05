@@ -10,6 +10,7 @@ export * from './store/schemas.ts';
 export * from './store/event-log.ts';
 export * from './store/journal.ts';
 export * from './store/observations.ts';
+export * from './store/progress.ts';
 export * from './store/data-root.ts';
 export * from './store/migrations.ts';
 export * from './store/profiles.ts';

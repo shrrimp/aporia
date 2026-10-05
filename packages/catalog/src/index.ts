@@ -5,3 +5,4 @@ export * from './agent-guide.ts';
 export * from './form.ts';
 export * from './normalize.ts';
 export * from './expr/index.ts';
+export * from './progress.ts';
