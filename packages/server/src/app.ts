@@ -15,6 +15,8 @@ import {
   deriveLearnerState,
   difficultyFromLevel,
   isObservation,
+  lessonProgress,
+  projectProgress,
   matchesFilter,
   ratingConfidence,
   systemClock,
@@ -26,10 +28,11 @@ import {
   type OpenProfile,
   type ProfileFile,
 } from '@app/core';
-import { lesson as lessonSchema, normalizeLesson } from '@app/catalog';
+import { lesson as lessonSchema, lessonCompletion, normalizeLesson } from '@app/catalog';
 import { TeacherHttpServer, lessonTarget, lessonsDir, projectTarget, registerLessonValidator } from '@app/teacher-mcp';
 import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
+import { recap, Transcripts, type TranscriptEntry } from './transcripts.ts';
 import { methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents } from './protocol.ts';
 
 const LEARNER: Author = { kind: 'learner' };
@@ -48,6 +51,7 @@ interface OpenState {
   readonly profile: OpenProfile;
   settings: ProfileDTO['settings'];
   agents: AgentSessions;
+  transcripts: Transcripts;
 }
 
 const projectFile = z.strictObject({
@@ -102,9 +106,10 @@ export class AppService {
 
   async #closeProfile(): Promise<void> {
     if (!this.#open) return;
-    const { profile, agents } = this.#open;
+    const { profile, agents, transcripts } = this.#open;
     this.#open = undefined;
     await agents.close();
+    await transcripts.flush();
     await profile.close();
   }
 
@@ -143,7 +148,7 @@ export class AppService {
       const profile = await this.#store.open(profileId);
       registerLessonValidator(profile.changes);
       this.#teacher ??= await TeacherHttpServer.start();
-      const state = { profile, settings: profile.profile.settings, agents: undefined as unknown as AgentSessions };
+      const state = { profile, settings: profile.profile.settings, agents: undefined as unknown as AgentSessions, transcripts: new Transcripts(profile.dir) };
       state.agents = new AgentSessions(this.#spec, this.#factory, this.#teacher, profile, () => state.settings);
       this.#open = state;
       return toProfileDTO(profile.profile);
@@ -193,10 +198,12 @@ export class AppService {
       const { profile } = this.#profile();
       const prefix = `${lessonsDir(projectId)}/`;
       const targets = [...new Set(profile.changes.list({ status: 'applied' }).map((c) => c.target))].filter((t) => t.startsWith(prefix)).sort();
+      const progress = projectProgress(profile.journal.events, projectId);
       const out = [];
       for (const t of targets) {
         const l = lessonSchema.safeParse(normalizeLesson(await profile.changes.read(t)));
-        if (l.success) out.push({ id: l.data.id, title: l.data.title, kind: l.data.kind, estimateMin: l.data.estimateMin });
+        if (l.success)
+          out.push({ id: l.data.id, title: l.data.title, kind: l.data.kind, estimateMin: l.data.estimateMin, progress: lessonCompletion(l.data, progress[l.data.id] ?? {}) });
       }
       return out;
     },
@@ -235,6 +242,16 @@ export class AppService {
       this.#emit('changed', { what: 'learner' });
       return { id: e.id };
     },
+
+    'progress.get': async ({ projectId, lessonId }) => ({ ...lessonProgress(this.#profile().profile.journal.events, projectId, lessonId) }),
+
+    'progress.set': async ({ projectId, lessonId, key, value }) => {
+      const e = await this.#profile().profile.progress.set(LEARNER, projectId, lessonId, key, value as JsonValue);
+      if (e) this.#emit('changed', { what: 'progress' });
+      return { saved: e !== undefined };
+    },
+
+    'conversations.get': async ({ projectId, thread }) => this.#profile().transcripts.read(projectId, thread),
 
     'history.list': async ({ filter }) => historyOf(this.#profile().profile, filter),
 
@@ -285,12 +302,50 @@ export class AppService {
       if (!project) throw new AppError('not_found', `no project ${q.projectId}`);
       const askId = randomUUID();
       const prompt = buildAskPrompt(q);
-      const onEvent = (event: TurnEvent) => this.#emit('ask.event', { askId, event: event as AskEvent });
+      // Everything shown is also saved, so the conversation is still there after a restart.
+      // Streamed text is gathered and written between other events, not chunk by chunk.
+      // Only for the recap: an unreadable history must not stop the learner from asking.
+      const earlier = await open.transcripts.read(project.id, q.thread).catch(() => []);
+      const save = (entries: TranscriptEntry[]) =>
+        void open.transcripts.append(project.id, q.thread, entries).catch((err: unknown) => console.error(`could not save the conversation: ${(err as Error).message}`));
+      let text = '';
+      const flush = () => {
+        if (text) save([{ t: 'event', askId, event: { kind: 'text', text } }]);
+        text = '';
+      };
+      save([
+        ...(q.answers ? [{ t: 'submitted' as const, askId: q.answers.askId, form: q.answers.form, answers: q.answers.values }] : []),
+        {
+          t: 'ask',
+          askId,
+          at: open.profile.journal.now().toISOString(),
+          question: q.question,
+          ...(q.selection ? { selection: q.selection } : {}),
+          ...(q.answers ? { answersTo: q.answers.title } : {}),
+          ...(q.lessonId ? { lessonId: q.lessonId } : {}),
+        },
+      ]);
+      const onEvent = (event: TurnEvent) => {
+        this.#emit('ask.event', { askId, event: event as AskEvent });
+        if (event.kind === 'text') text += event.text;
+        else if (event.kind !== 'thought') {
+          flush();
+          save([{ t: 'event', askId, event: event as AskEvent }]);
+        }
+      };
       void open.agents
-        .ask(project, q.lessonId, q.thread, prompt, onEvent, (cancel) => this.#asks.set(askId, cancel))
+        .ask(project, q.lessonId, q.thread, prompt, onEvent, (cancel) => this.#asks.set(askId, cancel), () => recap(earlier))
         .then(
-          (stopReason) => this.#emit('ask.done', { askId, stopReason }),
-          (err: unknown) => this.#emit('ask.error', { askId, message: (err as Error).message }),
+          (stopReason) => {
+            flush();
+            save([{ t: 'end', askId, state: stopReason === 'cancelled' ? 'cancelled' : 'done' }]);
+            this.#emit('ask.done', { askId, stopReason });
+          },
+          (err: unknown) => {
+            flush();
+            save([{ t: 'end', askId, state: 'error', error: (err as Error).message }]);
+            this.#emit('ask.error', { askId, message: (err as Error).message });
+          },
         )
         .finally(() => {
           this.#asks.delete(askId);

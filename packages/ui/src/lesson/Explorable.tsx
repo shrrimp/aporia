@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatValue, type Explorable as ExplorableDoc } from '@app/catalog';
+import { blockKey, formatValue, type Explorable as ExplorableDoc } from '@app/catalog';
+import { useAnchor, useSaved } from './progress.tsx';
 import { Diagram } from './Diagram.tsx';
 import { Plot } from './Plot.tsx';
 import { ev, runAssignments, type Env, type Value } from './eval.ts';
@@ -16,8 +17,9 @@ export function initialEnv(doc: ExplorableDoc): Record<string, Value> {
 }
 
 export function Explorable({ doc }: { doc: ExplorableDoc }) {
-  const [predicted, setPredicted] = useState(doc.predictFirst === undefined);
-  const [prediction, setPrediction] = useState('');
+  const [saved, save] = useSaved<{ prediction: string }>(blockKey(useAnchor()));
+  const [predicted, setPredicted] = useState(doc.predictFirst === undefined || saved !== undefined);
+  const [prediction, setPrediction] = useState(saved?.prediction ?? '');
   const [env, setEnv] = useState<Record<string, Value>>(() => initialEnv(doc));
   const [error, setError] = useState<string>();
   const [playing, setPlaying] = useState<number | null>(null);
@@ -50,7 +52,10 @@ export function Explorable({ doc }: { doc: ExplorableDoc }) {
       <div className="explorable locked">
         <p className="predict-label">Before you try it: {doc.predictFirst}</p>
         <textarea aria-label="Your prediction" value={prediction} onChange={(e) => setPrediction(e.target.value)} rows={2} />
-        <button type="button" disabled={prediction.trim() === ''} onClick={() => setPredicted(true)}>
+        <button type="button" disabled={prediction.trim() === ''} onClick={() => {
+            setPredicted(true);
+            save({ prediction });
+          }}>
           Commit prediction
         </button>
       </div>

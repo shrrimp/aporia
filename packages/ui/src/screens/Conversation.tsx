@@ -1,32 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { AskEvent, ServerEvents } from '@app/server/protocol';
+import type { ServerEvents, TranscriptEntry } from '@app/server/protocol';
 import { useEvent, useRpc } from '../hooks.tsx';
 import { Markdown } from '../lesson/Markdown.tsx';
 import { PixelMark } from '../PixelMark.tsx';
 import { describeTool } from './activity.ts';
 import { Proposals } from './Proposals.tsx';
 import { FormCard } from './FormCard.tsx';
-import type { FormAnswer, LearnerForm } from '@app/catalog';
-
-interface Step {
-  readonly id: string;
-  title?: string;
-  status?: string;
-}
-
-interface Turn {
-  readonly askId?: string;
-  readonly question: string;
-  readonly selection?: string;
-  /** Set when this message carries answers to a form: shown compactly. */
-  readonly answersTo?: string;
-  forms: { form: LearnerForm; submitted?: Record<string, FormAnswer> }[];
-  answer: string;
-  steps: Step[];
-  blocked: string[];
-  state: 'running' | 'done' | 'error' | 'cancelled';
-  error?: string;
-}
+import { applyEntry, replay, type Step, type Turn } from './turns.ts';
+import type { FormAnswer } from '@app/catalog';
 
 export interface AskRequest {
   readonly question: string;
@@ -112,60 +93,38 @@ export function Conversation({
   const handled = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const update = useCallback((askId: string, f: (t: Turn) => void) => {
-    setTurns((ts) =>
-      ts.map((t) => {
-        if (t.askId !== askId) return t;
-        const copy: Turn = { ...t, steps: t.steps.map((s) => ({ ...s })), blocked: [...t.blocked], forms: [...t.forms] };
-        f(copy);
-        return copy;
-      }),
-    );
-  }, []);
+  const apply = useCallback((e: TranscriptEntry) => setTurns((ts) => applyEntry(ts, e)), []);
+  const thread = variant === 'chat' ? 'chat' : 'session';
 
-  useEvent(
-    'ask.event',
-    useCallback(
-      ({ askId, event }: ServerEvents['ask.event']) =>
-        update(askId, (t) => {
-          const e = event as AskEvent;
-          if (e.kind === 'text') t.answer += e.text;
-          else if (e.kind === 'form') t.forms.push({ form: e.form });
-          else if (e.kind === 'tool') {
-            const s = t.steps.find((x) => x.id === e.id);
-            if (!s) t.steps.push({ id: e.id, ...(e.title ? { title: e.title } : {}), ...(e.status ? { status: e.status } : {}) });
-            else {
-              if (e.status) s.status = e.status;
-              if (e.title && !s.title) s.title = e.title;
-            }
-          } else if (e.kind === 'permission' && !e.decision.allow) t.blocked.push(describeTool(e.title).label);
-          else if (e.kind === 'blocked-fs') t.blocked.push(`${e.op === 'write' ? 'writing' : 'reading'} ${e.path.split(/[\\/]/).at(-1)}`);
-        }),
-      [update],
-    ),
-  );
+  // The saved conversation comes first; anything that happened while it loaded stays after it.
+  useEffect(() => {
+    let live = true;
+    rpc.call('conversations.get', { projectId, thread }).then(
+      (entries) => {
+        if (!live) return;
+        const saved = replay(entries);
+        setTurns((ts) => [...saved, ...ts.filter((t) => !t.askId || !saved.some((x) => x.askId === t.askId))]);
+      },
+      () => undefined, // nothing saved can be read: start empty
+    );
+    return () => {
+      live = false;
+    };
+  }, [rpc, projectId, thread]);
+
+  useEvent('ask.event', useCallback(({ askId, event }: ServerEvents['ask.event']) => apply({ t: 'event', askId, event }), [apply]));
   useEvent(
     'ask.done',
-    useCallback(({ askId, stopReason }: ServerEvents['ask.done']) => update(askId, (t) => (t.state = stopReason === 'cancelled' ? 'cancelled' : 'done')), [update]),
+    useCallback(({ askId, stopReason }: ServerEvents['ask.done']) => apply({ t: 'end', askId, state: stopReason === 'cancelled' ? 'cancelled' : 'done' }), [apply]),
   );
-  useEvent(
-    'ask.error',
-    useCallback(
-      ({ askId, message }: ServerEvents['ask.error']) =>
-        update(askId, (t) => {
-          t.state = 'error';
-          t.error = message;
-        }),
-      [update],
-    ),
-  );
+  useEvent('ask.error', useCallback(({ askId, message }: ServerEvents['ask.error']) => apply({ t: 'end', askId, state: 'error', error: message }), [apply]));
 
   const send = useCallback(
-    async (question: string, sel?: { text: string; anchor?: string }, answersTo?: string) => {
+    async (question: string, sel?: { text: string; anchor?: string }, answers?: { askId: string; form: number; title: string; values: Record<string, FormAnswer> }) => {
       const pending: Turn = {
         question,
         ...(sel ? { selection: sel.text } : {}),
-        ...(answersTo ? { answersTo } : {}),
+        ...(answers ? { answersTo: answers.title } : {}),
         answer: '',
         steps: [],
         blocked: [],
@@ -180,14 +139,15 @@ export function Conversation({
           ...(lessonId ? { lessonId } : {}),
           ...(sel ? { selection: sel.text } : {}),
           ...(sel?.anchor ? { anchor: sel.anchor } : {}),
-          thread: variant === 'chat' ? 'chat' : 'session',
+          thread,
+          ...(answers ? { answers } : {}),
         });
         setTurns((ts) => [...ts, { ...pending, askId }]);
       } catch (err) {
         setTurns((ts) => [...ts, { ...pending, state: 'error', error: (err as Error).message }]);
       }
     },
-    [rpc, projectId, lessonId, onActivity, variant],
+    [rpc, projectId, lessonId, onActivity, thread],
   );
 
   useEffect(() => {
@@ -260,10 +220,9 @@ export function Conversation({
                   form={f.form}
                   submitted={f.submitted}
                   onSubmit={(message, answers) => {
-                    setTurns((ts) =>
-                      ts.map((x) => (x === t ? { ...x, forms: x.forms.map((y, yi) => (yi === fi ? { ...y, submitted: answers } : y)) } : x)),
-                    );
-                    void send(message, undefined, f.form.title);
+                    // Saved turns all have an askId; only a turn that failed to start lacks one, and it has no forms.
+                    apply({ t: 'submitted', askId: t.askId!, form: fi, answers });
+                    void send(message, undefined, { askId: t.askId!, form: fi, title: f.form.title, values: answers });
                   }}
                 />
               ))}
@@ -273,6 +232,7 @@ export function Conversation({
                 </p>
               )}
               {t.state === 'cancelled' && <p className="quiet">Stopped.</p>}
+              {t.state === 'interrupted' && <p className="quiet">Cut off: the app closed before your tutor finished. Ask again to pick up.</p>}
             </div>
           </div>
         ))}

@@ -42,6 +42,8 @@ export interface LessonSummaryDTO {
   readonly title: string;
   readonly kind: string;
   readonly estimateMin: number;
+  /** Units the learner finished (answered, revealed, sent, marked done) out of all of them. */
+  readonly progress: { readonly done: number; readonly total: number };
 }
 
 export interface LearnerDTO {
@@ -95,7 +97,21 @@ export const askInput = z.strictObject({
    * per project whatever lesson is open, so it remembers what was already discussed.
    */
   thread: z.enum(['chat', 'session']).default('chat'),
+  /** This message carries the answers to a form the tutor showed (shown compactly, and saved). */
+  answers: z
+    .strictObject({
+      askId: z.string().max(80),
+      form: z.number().int().min(0).max(50),
+      title: z.string().max(120),
+      values: z.record(z.string().max(64), z.unknown()).refine((v) => JSON.stringify(v).length <= 40_000, { message: 'answers too large' }),
+    })
+    .optional(),
 });
+
+/** Any JSON value (kept local: the UI imports this file and must not pull in Node code). */
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+const progressValue = z.json().refine((v) => JSON.stringify(v).length <= 20_000, { message: 'progress value too large' });
 
 /** Every method: params schema + result type. */
 export const methods = {
@@ -110,6 +126,9 @@ export const methods = {
   'lessons.get': z.strictObject({ projectId: slugId, lessonId: slugId }),
   'learner.summary': z.strictObject({}),
   'answers.record': answerInput,
+  'progress.get': z.strictObject({ projectId: slugId, lessonId: slugId }),
+  'progress.set': z.strictObject({ projectId: slugId, lessonId: slugId, key: z.string().min(1).max(200), value: progressValue }),
+  'conversations.get': z.strictObject({ projectId: slugId, thread: z.enum(['chat', 'session']) }),
   'history.list': z.strictObject({ filter: historyFilter.default({}) }),
   'history.undo': z.strictObject({ id: z.string().max(80), withDependants: z.boolean().default(false) }),
   'history.redo': z.strictObject({ id: z.string().max(80) }),
@@ -135,6 +154,9 @@ export interface Results {
   'lessons.get': unknown;
   'learner.summary': LearnerDTO;
   'answers.record': { id: string };
+  'progress.get': Record<string, JsonValue>;
+  'progress.set': { saved: boolean };
+  'conversations.get': TranscriptEntry[];
   'history.list': HistoryItemDTO[];
   'history.undo': { undone: string[] };
   'history.redo': { id: string };
@@ -146,6 +168,16 @@ export interface Results {
 }
 
 /** Agent turn events forwarded to the UI (mirrors the agent host's HostEvent). */
+/**
+ * One line of a saved conversation. The UI replays these through the same code that handles
+ * live events, so a restored conversation looks exactly like it did.
+ */
+export type TranscriptEntry =
+  | { t: 'ask'; askId: string; at: string; question: string; selection?: string; answersTo?: string; lessonId?: string }
+  | { t: 'event'; askId: string; event: AskEvent }
+  | { t: 'submitted'; askId: string; form: number; answers: Record<string, unknown> }
+  | { t: 'end'; askId: string; state: 'done' | 'cancelled' | 'error'; error?: string };
+
 export type AskEvent =
   | { kind: 'text'; text: string }
   | { kind: 'thought'; text: string }
@@ -161,7 +193,7 @@ export interface ServerEvents {
   'ask.done': { askId: string; stopReason: string };
   'ask.error': { askId: string; message: string };
   /** Something changed: the UI refreshes what it shows. */
-  changed: { what: 'profiles' | 'projects' | 'lessons' | 'history' | 'learner' };
+  changed: { what: 'profiles' | 'projects' | 'lessons' | 'history' | 'learner' | 'progress' };
 }
 
 export type ErrorCode = 'invalid_params' | 'not_found' | 'no_profile' | 'conflict' | 'dependants' | 'agent' | 'internal' | 'unknown_method';

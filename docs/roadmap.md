@@ -29,7 +29,7 @@ Everything needed to learn Heavy Metal Physics in Aporia instead of in artifacts
 
 | # | Work | Why |
 |---|---|---|
-| 1.1 | **Lesson progress persists**: drill answers, predictions, reveals, explorable predictions and task status are saved and restored. A lesson remembers where you were | Today a reload loses your place |
+| 1.1 | **Lesson progress persists**: drill answers, predictions, reveals, explorable predictions and task status are saved and restored. A lesson remembers where you were. **Done**, along with saved tutor conversations | Today a reload loses your place |
 | 1.2 | **Checkpoint runner**: run the project's test command (filtered by suite), parse pass counts, show the ladder, and record evidence | Step-level feedback is the most effective tutoring signal (T1) |
 | 1.3 | **Structured interview**: probes rendered as real activities, results in `assessment.json`, KC graph drafted and shown | The first lesson must start at the right level (W2, W6) |
 | 1.4 | **Curriculum view**: the KC graph as a path, lesson planning (next 2–3 detailed), "what's next" | Orientation and autonomy (MO1) |

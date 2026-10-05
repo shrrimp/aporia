@@ -25,7 +25,7 @@ if (profiles.length === 0) {
   });
   await app.call('profiles.updateSettings', { changeMode: 'auto' });
   // The scripted tutor drafts the golden lesson when asked for "lesson".
-  await app.call('ask', { projectId: project.id, question: 'lesson please' });
+  await app.call('ask', { projectId: project.id, question: 'lesson please', thread: 'session' });
   await new Promise((r) => setTimeout(r, 500));
 }
 const ui = path.join(path.dirname(fileURLToPath(import.meta.url)), '../packages/ui/dist');

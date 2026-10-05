@@ -4,6 +4,8 @@ import type { ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc } from '../hooks.tsx';
 import { LessonView } from '../lesson/LessonView.tsx';
 import { LessonActionsContext, type LessonActions } from '../lesson/actions.tsx';
+import { ProgressContext, type LessonProgress } from '../lesson/progress.tsx';
+import type { JsonValue } from '@app/server/protocol';
 import { PixelMark, Wordmark } from '../PixelMark.tsx';
 import { Conversation, type AskRequest } from './Conversation.tsx';
 import { HistoryPanel } from './HistoryPanel.tsx';
@@ -21,11 +23,25 @@ const INTERVIEW = 'Interview me briefly to find out what I already know for this
  */
 export function ProjectView({ project, profile, onProfile, onBack }: { project: ProjectDTO; profile: ProfileDTO; onProfile: (p: ProfileDTO) => void; onBack: () => void }) {
   const rpc = useRpc();
-  const lessons = useQuery('lessons.list', { projectId: project.id }, ['lessons']);
+  const lessons = useQuery('lessons.list', { projectId: project.id }, ['lessons', 'progress']);
   const [lessonId, setLessonId] = useState<string>();
   const current = lessonId ?? lessons.data?.[0]?.id;
   const currentTitle = lessons.data?.find((l) => l.id === current)?.title;
   const lessonDoc = useQuery('lessons.get', current ? { projectId: project.id, lessonId: current } : null, ['lessons']);
+  const savedProgress = useQuery('progress.get', current ? { projectId: project.id, lessonId: current } : null);
+  // Saves made since the progress loaded, so counts update without reloading the lesson.
+  const [local, setLocal] = useState<{ lessonId?: string; values: Record<string, JsonValue> }>({ values: {} });
+  const progress: LessonProgress = useMemo(
+    () => ({
+      saved: { ...savedProgress.data, ...(local.lessonId === current ? local.values : {}) },
+      save: (key, value) => {
+        if (!current) return;
+        setLocal((l) => ({ lessonId: current, values: { ...(l.lessonId === current ? l.values : {}), [key]: value } }));
+        void rpc.call('progress.set', { projectId: project.id, lessonId: current, key, value }).catch(() => undefined);
+      },
+    }),
+    [savedProgress.data, local, current, rpc, project.id],
+  );
   const parsed = useMemo(() => (lessonDoc.data ? lessonSchema.safeParse(normalizeLesson(lessonDoc.data)) : undefined), [lessonDoc.data]);
   const [view, setView] = useState<View>();
   // Until the learner chooses, a project without lessons opens on the session page.
@@ -160,7 +176,12 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
                   }}
                 >
                   <span className="n">{String(i + 1).padStart(2, '0')}</span>
-                  {l.title}
+                  <span className="t">{l.title}</span>
+                  {l.progress.total > 0 && l.progress.done > 0 && (
+                    <span className={`p ${l.progress.done === l.progress.total ? 'all' : ''}`} aria-label={`${l.progress.done} of ${l.progress.total} done`}>
+                      {l.progress.done}/{l.progress.total}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -183,7 +204,10 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
           </div>
           <div hidden={shown !== 'lesson'} ref={lessonRef} onMouseUp={onMouseUp}>
             <LessonActionsContext.Provider value={actions}>
-              {parsed?.success && <LessonView lesson={parsed.data} />}
+              <ProgressContext.Provider value={progress}>
+                {/* Blocks read their saved state when they mount: wait for it, and remount per lesson. */}
+                {parsed?.success && savedProgress.data && <LessonView key={current} lesson={parsed.data} />}
+              </ProgressContext.Provider>
               {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}
             </LessonActionsContext.Provider>
           </div>

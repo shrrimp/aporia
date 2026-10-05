@@ -89,12 +89,18 @@ export class AgentSessions {
     prompt: string,
     onEvent: (e: TurnEvent) => void,
     onStart: (cancel: () => Promise<void>) => void,
+    /** For a reused conversation whose agent session is new (e.g. after a restart): what was said before. */
+    recap?: () => string | undefined,
   ): Promise<string> {
     const key = this.#key(project, lessonId, thread);
     let live = key ? this.#live.get(key) : undefined;
     if (!live) {
       live = await this.#open(project);
-      if (key) this.#live.set(key, live);
+      if (key) {
+        this.#live.set(key, live);
+        const earlier = recap?.();
+        if (earlier) prompt = `${earlier}\n\n${prompt}`;
+      }
     }
     const host = await this.#hostOnce();
     const sessionId = live.sessionId;

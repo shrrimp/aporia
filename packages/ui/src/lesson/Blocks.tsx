@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import katex from 'katex';
-import type { Component } from '@app/catalog';
+import { blockKey, taskKey, type Component } from '@app/catalog';
+import { useAnchor, useSaved } from './progress.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Diagram } from './Diagram.tsx';
 import { Plot } from './Plot.tsx';
@@ -67,9 +68,10 @@ function CodeBlock({ doc }: { doc: Of<'code'> }) {
   return render(doc.source, CODE_LABEL[doc.kind]);
 }
 
-function Reveal({ prompt, reveal, options, onCommit }: { prompt: string; reveal: string; options?: string[]; onCommit?: (answer: string) => void }) {
-  const [answer, setAnswer] = useState('');
-  const [shown, setShown] = useState(false);
+function Reveal({ prompt, reveal, options }: { prompt: string; reveal: string; options?: string[] }) {
+  const [saved, save] = useSaved<{ answer: string }>(blockKey(useAnchor()));
+  const [answer, setAnswer] = useState(saved?.answer ?? '');
+  const [shown, setShown] = useState(saved !== undefined);
   return (
     <div className={`reveal ${shown ? 'shown' : ''}`}>
       <Markdown md={prompt} />
@@ -92,7 +94,7 @@ function Reveal({ prompt, reveal, options, onCommit }: { prompt: string; reveal:
             disabled={answer.trim() === ''}
             onClick={() => {
               setShown(true);
-              onCommit?.(answer);
+              save({ answer });
             }}
           >
             Reveal
@@ -111,8 +113,9 @@ function Reveal({ prompt, reveal, options, onCommit }: { prompt: string; reveal:
 
 function ExplainBack({ doc }: { doc: Of<'explain-back'> }) {
   const actions = useLessonActions();
-  const [text, setText] = useState('');
-  const [sent, setSent] = useState(false);
+  const [saved, save] = useSaved<{ text: string }>(blockKey(useAnchor()));
+  const [text, setText] = useState(saved?.text ?? '');
+  const [sent, setSent] = useState(saved !== undefined);
   return (
     <div className="explain-back">
       <header>Explain it back</header>
@@ -123,6 +126,7 @@ function ExplainBack({ doc }: { doc: Of<'explain-back'> }) {
         disabled={sent || text.trim().length < 10}
         onClick={() => {
           setSent(true);
+          save({ text });
           actions.ask(
             `Explain-back on ${doc.kcs.join(', ')}. Prompt: ${doc.prompt}\nMy explanation: ${text}\nRubric: ${doc.rubric.join('; ')}\n` +
               'Score it 0–5 twice independently against the rubric, record the evidence (explain-back, with agreement), then tell me what I got right and the one thing to fix.',
@@ -139,8 +143,10 @@ const SCAFFOLD = ['Open problem', 'Goal only', 'Contract', 'Completion', 'Guided
 
 function Task({ doc }: { doc: Of<'task'> }) {
   const actions = useLessonActions();
+  const [saved, save] = useSaved<{ done: true }>(taskKey(doc.id));
+  const [done, setDone] = useState(saved !== undefined);
   return (
-    <article className="task" data-anchor={`task:${doc.id}`}>
+    <article className={`task ${done ? 'done' : ''}`} data-anchor={`task:${doc.id}`}>
       <header>
         <span className="task-label">Task</span> {doc.title}
         <span className="scaffold" title="How much structure this task gives you">{SCAFFOLD[doc.scaffold]} level</span>
@@ -176,6 +182,18 @@ function Task({ doc }: { doc: Of<'task'> }) {
       <button type="button" className="hint" onClick={() => actions.ask(`I'm stuck on task "${doc.title}". Give me the lowest hint level that helps.`, { anchor: `task:${doc.id}` })}>
         I'm stuck: give me a hint
       </button>
+      <label className="task-done">
+        <input
+          type="checkbox"
+          checked={done}
+          onChange={(e) => {
+            setDone(e.target.checked);
+            save(e.target.checked ? { done: true } : null);
+          }}
+        />
+        <span className="px" aria-hidden />
+        Done
+      </label>
     </article>
   );
 }

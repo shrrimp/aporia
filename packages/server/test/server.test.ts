@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { AgentHost, genericAgent } from '@app/agent-host';
 import { ManualClock } from '@app/core';
+import { lesson as lessonSchema, lessonUnits } from '@app/catalog';
+import { fourNumbers } from '../../catalog/fixtures/four-numbers.ts';
 import { AppService, buildAskPrompt, serve, type Served } from '../src/index.ts';
 import type { Method, Params, Results, ServerEvents, ServerMessage } from '../src/protocol.ts';
 import { fakeTeacherAgent, type FakeLog } from './fake-teacher-agent.ts';
@@ -181,7 +183,7 @@ describe('asking the agent', () => {
     expect(pending).toMatchObject({ kind: 'change', author: { kind: 'agent', agent: 'fake' } });
     await c.call('history.accept', { id: pending.id });
     const lessons = await c.call('lessons.list', { projectId: project.id });
-    expect(lessons).toEqual([{ id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120 }]);
+    expect(lessons).toEqual([{ id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120, progress: { done: 0, total: lessonUnits(lessonSchema.parse(fourNumbers)).length } }]);
     expect(await c.call('lessons.get', { projectId: project.id, lessonId: 'hmp-09-four-numbers' })).toMatchObject({ id: 'hmp-09-four-numbers' });
     await c.call('history.undo', { id: pending.id });
     expect(await c.call('lessons.list', { projectId: project.id })).toEqual([]);

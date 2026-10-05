@@ -20,8 +20,8 @@ const second = { ...fourNumbers, id: 'second', title: 'Second Lesson' };
 function rpc() {
   return new FakeRpc()
     .handle('lessons.list', () => [
-      { id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120 },
-      { id: 'second', title: 'Second Lesson', kind: 'build', estimateMin: 30 },
+      { id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120, progress: { done: 3, total: 9 } },
+      { id: 'second', title: 'Second Lesson', kind: 'build', estimateMin: 30, progress: { done: 0, total: 0 } },
     ])
     .handle('lessons.get', ({ lessonId }) => (lessonId === 'second' ? second : fourNumbers))
     .handle('history.list', () => [{ id: 'chg_1', kind: 'change', at: '2026-10-05T10:00:00.000Z', author: { kind: 'agent' }, summary: 's', status: 'proposed' }])

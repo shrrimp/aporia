@@ -21,7 +21,7 @@ function baseRpc() {
     .handle('profiles.open', () => profile)
     .handle('profiles.create', ({ displayName }) => ({ ...profile, id: 'prof_2', displayName }))
     .handle('projects.list', () => [project])
-    .handle('lessons.list', () => [{ id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120 }])
+    .handle('lessons.list', () => [{ id: 'hmp-09-four-numbers', title: 'Four Numbers, Three Speeds', kind: 'build', estimateMin: 120, progress: { done: 0, total: 9 } }])
     .handle('lessons.get', () => fourNumbers)
     .handle('history.list', () => [])
     .handle('learner.summary', () => ({ kcs: [], insights: [], recentSuccess: { correct: 0, total: 0 } }))

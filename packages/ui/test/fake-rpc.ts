@@ -11,6 +11,13 @@ export class FakeRpc {
   readonly #listeners = new Map<string, Set<(d: unknown) => void>>();
   readonly #status = new Set<(s: Status) => void>();
 
+  constructor() {
+    // Nothing saved yet, unless a test says otherwise.
+    this.handle('progress.get', () => ({}))
+      .handle('progress.set', () => ({ saved: true }))
+      .handle('conversations.get', () => []);
+  }
+
   handle(method: Method, h: Handler): this {
     this.#handlers.set(method, h);
     return this;

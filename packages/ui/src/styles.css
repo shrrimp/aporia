@@ -442,3 +442,17 @@ meter::-moz-meter-bar { background: var(--accent); }
 .insights li { display: grid; grid-template-columns: 3rem 1fr; gap: 0.7rem; align-items: center; font: italic 0.98rem var(--serif); }
 .setting { display: flex; gap: 0.6rem; align-items: center; margin: 0.6rem 0; color: var(--text-soft); }
 .setting:has(select) { flex-direction: column; align-items: stretch; gap: 0.4rem; }
+
+/* Progress: quiet counts in the contents and the lesson head; a task can be marked done. */
+.toc button { grid-template-columns: 1.8rem 1fr auto; }
+/* Small fractions stay in the UI face: the pixel numerals blur 2 into 8 at this size. */
+.toc button .p { font-size: 0.78rem; font-variant-numeric: tabular-nums; color: var(--text-faint); padding: 0.1rem 0 0 0.6rem; }
+.toc button .p.all { color: var(--accent); }
+.lesson-progress { margin: 0.8rem 0 0; font-size: 0.85rem; color: var(--text-faint); }
+.lesson-progress .num { color: var(--text-soft); }
+.task-done { display: inline-flex; align-items: baseline; gap: 0.6rem; margin: 0.8rem 0 0 1.2rem; font-size: 0.9rem; color: var(--text-soft); cursor: pointer; position: relative; }
+.task-done input { position: absolute; opacity: 0; pointer-events: none; }
+.task-done:has(input:checked) .px { background: var(--accent-strong); border-color: var(--accent-strong); }
+.task-done:has(input:focus-visible) { outline: 1px solid var(--accent); }
+.task.done header { color: var(--text-soft); }
+.exchange.state-interrupted .tutor-says > .quiet { font-style: italic; }

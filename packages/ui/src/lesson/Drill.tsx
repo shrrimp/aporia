@@ -1,18 +1,33 @@
 import { useState } from 'react';
-import type { DrillItem } from '@app/catalog';
+import { itemKey, type DrillItem } from '@app/catalog';
+import { useSaved } from './progress.tsx';
 import { Markdown } from './Markdown.tsx';
 import { score, shuffled, type Response } from './scoring.ts';
 import { useLessonActions } from './actions.tsx';
 
 type Confidence = 'sure' | 'think' | 'guess';
 
+/** A checked item as saved: what was given, and the result (-1: sent to the tutor to judge). */
+type SavedItem = { choice?: number; text?: string; order?: string[]; confidence?: Confidence; result: number };
+
 function Item({ item, confidence: askConfidence, purpose }: { item: DrillItem; confidence: boolean; purpose: string }) {
   const actions = useLessonActions();
-  const [choice, setChoice] = useState<number>();
-  const [text, setText] = useState('');
-  const [order, setOrder] = useState(() => (item.kind === 'order' ? shuffled(item.lines, item.id) : []));
-  const [confidence, setConfidence] = useState<Confidence>();
-  const [result, setResult] = useState<number>();
+  const [saved, save] = useSaved<SavedItem>(itemKey(item.id));
+  const [choice, setChoice] = useState<number | undefined>(saved?.choice);
+  const [text, setText] = useState(saved?.text ?? '');
+  const [order, setOrder] = useState(() => saved?.order ?? (item.kind === 'order' ? shuffled(item.lines, item.id) : []));
+  const [confidence, setConfidence] = useState<Confidence | undefined>(saved?.confidence);
+  const [result, setResult] = useState<number | undefined>(saved?.result);
+  const keep = (r: number) => {
+    setResult(r);
+    save({
+      ...(choice !== undefined ? { choice } : {}),
+      ...(item.kind === 'numeric' || item.kind === 'short' ? { text } : {}),
+      ...(item.kind === 'order' ? { order } : {}),
+      ...(confidence ? { confidence } : {}),
+      result: r,
+    });
+  };
 
   const response = (): Response | undefined => {
     if (item.kind === 'mcq') return choice === undefined ? undefined : { kind: 'mcq', choice };
@@ -28,11 +43,11 @@ function Item({ item, confidence: askConfidence, purpose }: { item: DrillItem; c
         `Judge my answer to drill item "${item.id}" (KCs ${item.kcs.join(', ')}). Question: ${item.prompt}\nMy answer: ${text}\n` +
           `Reference: ${item.answer}\nScore it 0–5 against the reference twice independently, record the evidence (production, difficulty ${item.difficulty}), and give me feedback without lecturing.`,
       );
-      setResult(-1);
+      keep(-1);
       return;
     }
     const outcome = score(item, response()!);
-    setResult(outcome);
+    keep(outcome);
     actions.recordAnswer({
       itemId: item.id,
       kcs: item.kcs,
