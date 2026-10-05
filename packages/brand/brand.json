@@ -1,0 +1,6 @@
+{
+  "$comment": "The ONLY place the product name is authored. Everything user-visible (window titles, CLI name, data folder, bundle extension) derives from this file. Internal package names use the neutral @app/* scope so a rename never touches code.",
+  "displayName": "Aporia",
+  "id": "aporia",
+  "tagline": "Learn by doing. The AI guides; you think."
+}
