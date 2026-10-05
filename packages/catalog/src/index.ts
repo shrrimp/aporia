@@ -3,4 +3,5 @@ export * from './validate.ts';
 export * from './stub-check.ts';
 export * from './agent-guide.ts';
 export * from './form.ts';
+export * from './normalize.ts';
 export * from './expr/index.ts';

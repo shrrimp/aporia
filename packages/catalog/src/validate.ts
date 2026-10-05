@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { lesson as lessonSchema, ICAP, type Component, type Diagram, type Explorable, type Lesson, type Plot } from './schema.ts';
 import { stubFindings } from './stub-check.ts';
+import { normalizeLesson } from './normalize.ts';
 import {
   ExprRuntimeError,
   ExprSyntaxError,
@@ -272,11 +273,22 @@ function formatPath(path: readonly PropertyKey[]): string {
 }
 
 /** Validate an agent-authored lesson. Errors reject it; warnings are returned for the agent to consider. */
+/** Say which field names the thing, so a model can fix the whole lesson in one go. */
+function hint(path: string, message: string): string {
+  if (!/discriminator|Invalid input/.test(message)) return message;
+  if (/blocks\[\d+\]\.type$/.test(path) || /\.view\.type$/.test(path)) return `${message}. Blocks say what they are with "type", e.g. {"type": "drill", …}`;
+  if (/(elements|controls|items)\[\d+\]\.kind$/.test(path)) return `${message}. Diagram elements, explorable controls and drill items use "kind", e.g. {"kind": "vector", …}`;
+  return message;
+}
+
 export function validateLesson(input: unknown): ValidationResult {
-  const parsed = lessonSchema.safeParse(input);
+  const parsed = lessonSchema.safeParse(normalizeLesson(input));
   if (!parsed.success) {
     return {
-      errors: parsed.error.issues.map((i: z.core.$ZodIssue) => ({ path: formatPath(i.path), message: i.message })),
+      errors: parsed.error.issues.map((i: z.core.$ZodIssue) => {
+        const path = formatPath(i.path);
+        return { path, message: hint(path, i.message) };
+      }),
       warnings: [],
     };
   }

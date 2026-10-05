@@ -1,5 +1,30 @@
 import { BUILTINS } from './expr/builtins.ts';
 
+const EXAMPLE = {
+  schemaVersion: 1,
+  catalogVersion: 1,
+  id: 'example-unit-length',
+  title: 'Why |q| must be 1',
+  standfirst: 'A rotation quaternion has length one. Here is what breaks when it does not.',
+  kind: 'theory',
+  kcs: ['quaternion.unit'],
+  estimateMin: 10,
+  sections: [
+    { id: 'warmup', role: 'warmup', blocks: [{ type: 'drill', purpose: 'warmup', items: [{ id: 'w1', kind: 'mcq', prompt: 'What is $|q|$ for a rotation?', options: ['0', '1', 'any'], answer: 1, kcs: ['quaternion.unit'], difficulty: 2, why: 'Only unit quaternions are rotations.' }] }] },
+    {
+      id: 'idea',
+      role: 'concept',
+      blocks: [
+        { type: 'prose', md: 'Scaling $q$ by $s$ scales $q\\,v\\,q^*$ by $s^2$.' },
+        { type: 'explorable', description: 'A vector rotated by a scaled quaternion', controls: [{ kind: 'slider', name: 's', label: 'scale s', min: 0.5, max: 1.5, step: 0.05, initial: 1 }], readouts: [{ label: '|q|', expr: 's' }], view: { type: 'diagram', dims: 2, description: 'v and its image', elements: [{ kind: 'vector', to: '[1, 0]', label: 'v' }, { kind: 'vector', to: '[0, s * s]', role: 'highlight', label: "v'" }] } },
+        { type: 'predict', prompt: 'At $s = 1.1$, how long is the image of a unit vector?', reveal: '$1.21$: the length is scaled by $s^2$.', kcs: ['quaternion.unit'] },
+      ],
+    },
+    { id: 'exit', role: 'exit', blocks: [{ type: 'explain-back', prompt: 'Why do engines renormalize orientations?', kcs: ['quaternion.unit'], rubric: ['rounding drifts |q| away from 1', 'non-unit q scales and skews'] }] },
+    { id: 'next', role: 'open-loop', blocks: [{ type: 'open-loop', md: 'Next: integrating $\\omega$ without leaving the unit sphere.' }] },
+  ],
+};
+
 /** Agent-facing reference for the component catalog. Semantic only: nothing about looks. */
 export function catalogGuide(): string {
   const fns = Object.keys(BUILTINS).sort().join(', ');
@@ -10,6 +35,15 @@ kcs: [kc ids], estimateMin, capability?, sections: [{ id, role, title?, blocks: 
 Section roles: warmup, hook, concept, practice, build, exit, open-loop.
 Ids are lowercase slugs. KC ids look like "quaternion.exp-map-side".
 Text fields use CommonMark + $TeX$ maths + \`code\`. No HTML.
+
+FIELD NAMES (exactly):
+- every block says what it is with "type":            {"type": "drill", ...}  {"type": "diagram", ...}
+- diagram elements, explorable controls, drill items use "kind":
+                                                       {"kind": "vector", ...} {"kind": "slider", ...} {"kind": "mcq", ...}
+- a code block has both: {"type": "code", "kind": "stub", ...}
+
+A complete minimal lesson (valid as-is):
+${JSON.stringify(EXAMPLE)}
 
 ## Reading
 - prose { md }
