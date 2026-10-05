@@ -8,7 +8,7 @@ import { fourNumbers } from '../../catalog/fixtures/four-numbers.ts';
 import { RpcProvider, useQuery, useRpc } from '../src/hooks.tsx';
 import { Block } from '../src/lesson/Blocks.tsx';
 import { ProjectView } from '../src/screens/ProjectView.tsx';
-import { AskPanel } from '../src/screens/AskPanel.tsx';
+import { Conversation } from '../src/screens/Conversation.tsx';
 import { Home } from '../src/screens/Home.tsx';
 import { RpcFailure } from '../src/rpc.ts';
 import { FakeRpc } from './fake-rpc.ts';
@@ -37,9 +37,9 @@ describe('ProjectView', () => {
     const r = rpc();
     const { container } = mount(r, <ProjectView project={project} profile={profile} onProfile={() => undefined} onBack={() => undefined} />);
     expect(await screen.findByLabelText('1 pending')).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'Second Lesson' }));
+    await user.click(await screen.findByRole('button', { name: /Second Lesson/ }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Second Lesson' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Second Lesson' })).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByRole('button', { name: /Second Lesson/ })).toHaveAttribute('aria-current', 'true');
 
     // Select text inside a lesson block.
     const para = container.querySelector('[data-anchor="why-not-derivative/0"] p')!;
@@ -49,21 +49,22 @@ describe('ProjectView', () => {
     const sel = window.getSelection()!;
     sel.removeAllRanges();
     sel.addRange(range);
-    fireEvent.mouseUp(container.querySelector('.lesson-pane')!);
+    fireEvent.mouseUp(container.querySelector('.lesson')!.parentElement!);
     const chip = await screen.findByRole('button', { name: 'Ask about this' });
     fireEvent.mouseDown(chip);
     await user.click(chip);
-    expect(await screen.findByText(/About: “A ball joint/)).toBeInTheDocument();
+    expect(await screen.findByText(/“A ball joint/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Tutor' })).toHaveAttribute('aria-pressed', 'true');
 
     // Selecting nothing clears the chip; selecting outside the lesson is ignored.
     sel.removeAllRanges();
-    fireEvent.mouseUp(container.querySelector('.lesson-pane')!);
+    fireEvent.mouseUp(container.querySelector('.lesson')!.parentElement!);
     expect(screen.queryByRole('button', { name: 'Ask about this' })).toBeNull();
-    const outside = container.querySelector('.topbar')!;
+    const outside = container.querySelector('.bar')!;
     const r2 = document.createRange();
     r2.selectNodeContents(outside);
     sel.addRange(r2);
-    fireEvent.mouseUp(container.querySelector('.lesson-pane')!);
+    fireEvent.mouseUp(container.querySelector('.lesson')!.parentElement!);
     expect(screen.queryByRole('button', { name: 'Ask about this' })).toBeNull();
 
     // Element anchor nodes (selection starting on an element).
@@ -73,7 +74,7 @@ describe('ProjectView', () => {
     r3.getBoundingClientRect = () => ({ left: 0, width: 0, top: 0 }) as DOMRect;
     sel.addRange(r3);
     vi.spyOn(sel, 'anchorNode', 'get').mockReturnValue(para);
-    fireEvent.mouseUp(container.querySelector('.lesson-pane')!);
+    fireEvent.mouseUp(container.querySelector('.lesson')!.parentElement!);
     expect(await screen.findByRole('button', { name: 'Ask about this' })).toBeInTheDocument();
     vi.restoreAllMocks();
 
@@ -83,15 +84,39 @@ describe('ProjectView', () => {
     await user.click(screen.getByRole('button', { name: 'Check' }));
     expect(r.calls.find((c) => c.method === 'answers.record')!.params).toMatchObject({ lessonId: 'second', confidence: 'guess' });
     await user.click(screen.getByRole('button', { name: /^History/ }));
+    expect(screen.getByRole('region', { name: 'History' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^History/ }));
-    await user.click(screen.getByRole('button', { name: /^Me/ }));
-    await user.click(screen.getByRole('button', { name: /^Me/ }));
+    await user.click(screen.getByRole('button', { name: 'You' }));
+    expect(screen.getByRole('region', { name: 'What the app knows about you' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'You' }));
   });
 
-  it('records nothing when there is no lesson yet', async () => {
-    const r = rpc().handle('lessons.list', () => []);
+  it('opens a new project on the interview page and runs it there', async () => {
+    const user = userEvent.setup();
+    const r = rpc().handle('lessons.list', () => []).handle('history.list', () => []);
     mount(r, <ProjectView project={project} profile={profile} onProfile={() => undefined} onBack={() => undefined} />);
-    expect(await screen.findByText('No lessons yet.')).toBeInTheDocument();
+    expect(await screen.findByText(/Lessons appear here/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Interview/ })).toHaveAttribute('aria-current', 'true');
+    await user.click(screen.getByRole('button', { name: 'Start the interview' }));
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ question: expect.stringMatching(/^Interview me/) });
+    act(() => r.emit('ask.event', { askId: 'a', event: { kind: 'tool', id: 't', title: 'mcp__aporia__get_teaching_context', status: 'pending' } }));
+    expect(await screen.findAllByText('working')).not.toHaveLength(0);
+    expect(screen.getByText('Reading your learner profile')).toBeInTheDocument();
+    act(() => r.emit('ask.done', { askId: 'a', stopReason: 'end_turn' }));
+  });
+
+  it('plans the next lesson from the sessions page, and shows proposals there unless the chat is open', async () => {
+    const user = userEvent.setup();
+    const r = rpc();
+    mount(r, <ProjectView project={project} profile={profile} onProfile={() => undefined} onBack={() => undefined} />);
+    await user.click(await screen.findByRole('button', { name: /Sessions/ }));
+    expect(screen.getByRole('region', { name: 'Proposed changes' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Plan the next lesson' }));
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ question: expect.stringMatching(/what should I learn next/) });
+    await user.click(screen.getByRole('button', { name: /Back to/ }));
+    expect(screen.getByRole('button', { name: /Four Numbers, Three Speeds/ })).toHaveAttribute('aria-current', 'true');
+    await user.click(screen.getByRole('button', { name: /^Tutor/ }));
+    expect(screen.getAllByRole('region', { name: 'Proposed changes' })).toHaveLength(1);
   });
 });
 
@@ -182,15 +207,13 @@ describe('misc branches', () => {
     expect(screen.getAllByRole('button', { name: 'Check' })[1]).toBeDisabled();
 
     const r = new FakeRpc().handle('ask', () => ({ askId: 'z' }));
-    mount(r, <AskPanel projectId="p" lessonId={undefined} request={{ question: '', selection: 'x'.repeat(120), nonce: 1 }} />);
-    expect(await screen.findByText(/About: “x{80}…”/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(r.calls).toHaveLength(0); // empty question is not sent
+    mount(r.handle('history.list', () => []), <Conversation variant="chat" projectId="p" lessonId={undefined} request={{ question: '', selection: 'x'.repeat(200), nonce: 1 }} />);
+    expect(await screen.findByText(/“x{160}…”/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(r.calls.some((c) => c.method === 'ask')).toBe(false); // empty question is not sent
     await user.type(screen.getByLabelText('Your question'), 'q');
-    await user.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(r.calls[0]!.params).toEqual({ projectId: 'p', question: 'q', selection: 'x'.repeat(120) });
-    await user.click(screen.getByRole('button', { name: /^Tutor/ }));
-    expect(screen.getByRole('button', { name: /Ask your tutor/ })).toHaveAttribute('aria-expanded', 'false');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'q', selection: 'x'.repeat(200) });
   });
 
   it('home lists projects and creates one without coding fields', async () => {

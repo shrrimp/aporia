@@ -40,10 +40,38 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }): a
           requestInit: { headers: Object.fromEntries(server.headers.map((h) => [h.name, h.value])) },
         }) as unknown as Parameters<Client['connect']>[0],
       );
+      // Report tool use the way real agents do, so the UI's activity labels are exercised.
+      let toolN = 0;
+      const tool = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+        const toolCallId = `tc${++toolN}`;
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: params.sessionId,
+          update: { sessionUpdate: 'tool_call', toolCallId, title: `mcp__aporia__${name}`, kind: 'other', status: 'pending' },
+        });
+        const r = await fn();
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: params.sessionId,
+          update: { sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' },
+        });
+        return r;
+      };
+      const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
       try {
         const question = text.split('The learner asks:\n')[1] ?? '';
-        if (question.startsWith('lesson')) {
-          const r = await mcp.callTool({ name: 'draft_lesson', arguments: { lesson: fourNumbers } });
+        if (question.startsWith('Interview me')) {
+          await tool('get_teaching_context', () => mcp.callTool({ name: 'get_teaching_context', arguments: {} }));
+          await pause(1200);
+          for (const chunk of [
+            "Let's find your starting point. Three quick questions, answer in your own words; guessing is fine.\n\n",
+            '1. A rigid body in 3D: how many numbers do you need to say *where it is and how it is turned*, and why might you store more than that?\n\n',
+            '2. You rotate a vector by a quaternion with $q\\,v\\,q^*$. What goes wrong if $|q| \\neq 1$?\n\n',
+            '3. In your engine today, where does angular velocity live: world frame or body frame?',
+          ]) {
+            await say(chunk);
+            await pause(250);
+          }
+        } else if (question.startsWith('lesson')) {
+          const r = await tool('draft_lesson', () => mcp.callTool({ name: 'draft_lesson', arguments: { lesson: fourNumbers } }));
           await say((r.content as { text: string }[])[0]!.text);
         } else if (question.startsWith('evidence')) {
           await mcp.callTool({

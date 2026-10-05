@@ -8,7 +8,6 @@ import { RpcProvider } from '../src/hooks.tsx';
 import { App } from '../src/App.tsx';
 import { HistoryPanel } from '../src/screens/HistoryPanel.tsx';
 import { MePanel } from '../src/screens/MePanel.tsx';
-import { AskPanel } from '../src/screens/AskPanel.tsx';
 import { RpcFailure } from '../src/rpc.ts';
 import { FakeRpc } from './fake-rpc.ts';
 
@@ -36,7 +35,7 @@ describe('App flow', () => {
     const user = userEvent.setup();
     const rpc = baseRpc();
     mount(rpc, <App />);
-    expect(await screen.findByText('Learn by doing.')).toBeInTheDocument();
+    expect(await screen.findByText('Aporia')).toBeInTheDocument();
     await user.click(await screen.findByRole('button', { name: /Jules/ }));
     await user.click(await screen.findByRole('button', { name: /Heavy Metal Physics/ }));
     expect(await screen.findByRole('heading', { level: 1, name: 'Four Numbers, Three Speeds' })).toBeInTheDocument();
@@ -44,11 +43,11 @@ describe('App flow', () => {
     await user.click(screen.getByRole('radio', { name: 'Sure' }));
     await user.click(screen.getByRole('button', { name: 'Check' }));
     expect(rpc.calls.find((c) => c.method === 'answers.record')!.params).toMatchObject({ projectId: project.id, lessonId: 'hmp-09-four-numbers', itemId: 'w1', outcome: 1 });
-    await user.click(screen.getByRole('button', { name: /^Me/ }));
+    await user.click(screen.getByRole('button', { name: 'You' }));
     expect(await screen.findByText(/No evidence yet/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^History/ }));
     expect(await screen.findByText('Nothing yet.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '← Projects' }));
+    await user.click(screen.getByRole('button', { name: 'Projects' }));
     await user.click(await screen.findByRole('button', { name: /switch/ }));
     expect(await screen.findByRole('heading', { name: 'Who is learning?' })).toBeInTheDocument();
   });
@@ -84,7 +83,7 @@ describe('App flow', () => {
     rpc.handle('projects.create', (p) => ({ ...project, ...p, id: 'rust-cli-1' })).handle('lessons.list', () => []);
     await user.click(screen.getByRole('button', { name: 'Create project' }));
     expect(rpc.calls.filter((c) => c.method === 'projects.create').at(-1)!.params).toEqual({ title: 'Rust CLI', goal: 'Ship a CLI', why: '', workspace: '/tmp/ws', testCommand: 'cargo test' });
-    expect(await screen.findByText('No lessons yet.')).toBeInTheDocument();
+    expect(await screen.findByText(/Lessons appear here/)).toBeInTheDocument();
     rpc.handle('ask', () => ({ askId: 'a1' }));
     await user.click(screen.getByRole('button', { name: 'Start the interview' }));
     expect(rpc.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ projectId: 'rust-cli-1', question: expect.stringMatching(/Interview me/) });
@@ -207,65 +206,5 @@ describe('MePanel', () => {
     await user.selectOptions(screen.getByRole('combobox'), 'interaction');
     await waitFor(() => expect(updates.map((u) => u.settings.changeMode)).toContain('auto'));
     expect(updates.at(-1)!.settings.sessionMode).toBe('interaction');
-  });
-});
-
-describe('AskPanel', () => {
-  it('streams answers, shows tool use and blocks, and can stop', async () => {
-    const user = userEvent.setup();
-    const rpc = baseRpc().handle('ask', () => ({ askId: 'a1' })).handle('ask.cancel', () => ({ ok: true }));
-    const { rerender } = mount(rpc, <AskPanel projectId="p" lessonId="l" request={undefined} />);
-    await user.click(screen.getByRole('button', { name: /Ask your tutor/ }));
-    expect(screen.getByText(/won't write your solution/)).toBeInTheDocument();
-    await user.type(screen.getByLabelText('Your question'), 'why?');
-    await user.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(rpc.calls.find((c) => c.method === 'ask')!.params).toEqual({ projectId: 'p', question: 'why?', lessonId: 'l' });
-    act(() => {
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'text', text: 'Because ' } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'text', text: '**frames**.' } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'tool', id: 't', title: 'get_teaching_context' } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'tool', id: 't', title: 'get_teaching_context' } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'permission', title: 'Edit', decision: { allow: false, reason: 'no' } } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'permission', title: 'Read', decision: { allow: true, reason: 'ok' } } });
-      rpc.emit('ask.event', { askId: 'a1', event: { kind: 'blocked-fs', op: 'write', path: '/ws/x' } });
-      rpc.emit('ask.event', { askId: 'zz', event: { kind: 'text', text: 'other' } });
-    });
-    expect(screen.getByText('frames')).toBeInTheDocument();
-    expect(screen.getByText('Used: get_teaching_context')).toBeInTheDocument();
-    expect(screen.getByText('Blocked by the app: Edit, write /ws/x')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(rpc.calls.some((c) => c.method === 'ask.cancel')).toBe(true);
-    act(() => rpc.emit('ask.done', { askId: 'a1', stopReason: 'cancelled' }));
-    expect(screen.getByText('Stopped.')).toBeInTheDocument();
-
-    rerender(
-      <RpcProvider client={rpc.asClient()}>
-        <AskPanel projectId="p" lessonId={undefined} request={{ question: '', selection: 'selected text', anchor: 'sec/1', nonce: 1 }} />
-      </RpcProvider>,
-    );
-    expect(await screen.findByText(/About: “selected text”/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Remove selection' }));
-    expect(screen.queryByText(/About:/)).toBeNull();
-    rerender(
-      <RpcProvider client={rpc.asClient()}>
-        <AskPanel projectId="p" lessonId={undefined} request={{ question: '', selection: 'again', anchor: 'sec/2', nonce: 2 }} />
-      </RpcProvider>,
-    );
-    await user.type(screen.getByLabelText('Your question'), 'what is this?');
-    rpc.handle('ask', () => ({ askId: 'a2' }));
-    await user.click(screen.getByRole('button', { name: 'Ask' }));
-    expect(rpc.calls.filter((c) => c.method === 'ask').at(-1)!.params).toEqual({ projectId: 'p', question: 'what is this?', selection: 'again', anchor: 'sec/2' });
-    act(() => rpc.emit('ask.error', { askId: 'a2', message: 'agent died' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('agent died');
-    act(() => rpc.emit('ask.done', { askId: 'a2', stopReason: 'end_turn' }));
-  });
-
-  it('sends direct requests and reports failures to start', async () => {
-    const rpc = baseRpc().handle('ask', () => {
-      throw new RpcFailure({ code: 'no_profile', message: 'open a profile first' });
-    });
-    mount(rpc, <AskPanel projectId="p" lessonId="l" request={{ question: 'hint please', selection: 'sel', anchor: 'a', nonce: 1 }} />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('open a profile first');
-    expect(rpc.calls[0]!.params).toEqual({ projectId: 'p', question: 'hint please', lessonId: 'l', selection: 'sel', anchor: 'a' });
   });
 });

@@ -4,26 +4,51 @@ import type { ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc } from '../hooks.tsx';
 import { LessonView } from '../lesson/LessonView.tsx';
 import { LessonActionsContext, type LessonActions } from '../lesson/actions.tsx';
-import { AskPanel, type AskRequest } from './AskPanel.tsx';
+import { PixelMark } from '../PixelMark.tsx';
+import { Conversation, type AskRequest } from './Conversation.tsx';
 import { HistoryPanel } from './HistoryPanel.tsx';
 import { MePanel } from './MePanel.tsx';
 
-type Side = 'none' | 'history' | 'me';
+type Margin = 'none' | 'tutor' | 'history' | 'me';
+type View = 'session' | 'lesson';
 
-/** The workspace: lessons, the lesson, a small Ask drawer, and side panels. */
+const INTERVIEW = 'Interview me briefly to find out what I already know for this project, then draft the first lesson.';
+
+/**
+ * The workspace: contents on the left; a page in the middle, either a lesson or a session (the
+ * interview, planning: the heavy interactions get the whole page); and a margin with the quick
+ * tutor chat, History and You.
+ */
 export function ProjectView({ project, profile, onProfile, onBack }: { project: ProjectDTO; profile: ProfileDTO; onProfile: (p: ProfileDTO) => void; onBack: () => void }) {
   const rpc = useRpc();
   const lessons = useQuery('lessons.list', { projectId: project.id }, ['lessons']);
   const [lessonId, setLessonId] = useState<string>();
   const current = lessonId ?? lessons.data?.[0]?.id;
+  const currentTitle = lessons.data?.find((l) => l.id === current)?.title;
   const lessonDoc = useQuery('lessons.get', current ? { projectId: project.id, lessonId: current } : null, ['lessons']);
   const parsed = useMemo(() => (lessonDoc.data ? lessonSchema.safeParse(lessonDoc.data) : undefined), [lessonDoc.data]);
-  const [side, setSide] = useState<Side>('none');
-  const [askReq, setAskReq] = useState<AskRequest>();
+  const [view, setView] = useState<View>();
+  // Until the learner chooses, a project without lessons opens on the session page.
+  const shown: View = view ?? (lessons.data && lessons.data.length === 0 ? 'session' : 'lesson');
+  const [margin, setMargin] = useState<Margin>('none');
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatReq, setChatReq] = useState<AskRequest>();
+  const [sessionReq, setSessionReq] = useState<AskRequest>();
   const [chip, setChip] = useState<{ x: number; y: number; text: string; anchor?: string }>();
   const lessonRef = useRef<HTMLDivElement>(null);
   const history = useQuery('history.list', { filter: {} }, ['history']);
   const pending = history.data?.filter((h) => h.status === 'proposed').length ?? 0;
+
+  // Quick questions from the lesson go to the chat in the margin.
+  const ask = useCallback(
+    (question: string, opts?: { selection?: string; anchor?: string }) =>
+      setChatReq({ question, ...(opts?.selection ? { selection: opts.selection } : {}), ...(opts?.anchor ? { anchor: opts.anchor } : {}), nonce: Date.now() }),
+    [],
+  );
+  const startSession = useCallback((question: string) => setSessionReq({ question, nonce: Date.now() }), []);
+  const showChat = useCallback(() => setMargin('tutor'), []);
+  const showSession = useCallback(() => setView('session'), []);
 
   const actions: LessonActions = useMemo(
     () => ({
@@ -41,12 +66,12 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
           ...(a.confidence ? { confidence: a.confidence } : {}),
         });
       },
-      ask: (question, opts) => setAskReq({ question, ...(opts?.selection ? { selection: opts.selection } : {}), ...(opts?.anchor ? { anchor: opts.anchor } : {}), nonce: Date.now() }),
+      ask,
     }),
-    [rpc, project.id, current],
+    [rpc, project.id, current, ask],
   );
 
-  // Select any text in the lesson → a floating "Ask about this" chip.
+  // Select any text in the lesson → an "Ask about this" chip.
   const onMouseUp = useCallback(() => {
     const sel = window.getSelection();
     const text = sel?.toString().trim() ?? '';
@@ -61,56 +86,105 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
   }, []);
   useEffect(() => {
     setChip(undefined);
-  }, [current]);
+  }, [current, shown]);
+
+  const intro = (
+    <section className="intro">
+      <p className="meta">{lessons.data?.length === 0 ? 'New project' : 'Session'}</p>
+      <h1>{project.title}</h1>
+      <p className="goal">{project.goal}</p>
+      {lessons.data?.length === 0 ? (
+        <>
+          <p>
+            Before the first lesson, your tutor asks a few questions to find out what you already know, so the lesson starts at the right level.
+            Not knowing is fine: that is exactly what it needs to find out.
+          </p>
+          <button type="button" className="primary" onClick={() => startSession(INTERVIEW)}>
+            Start the interview
+          </button>
+        </>
+      ) : (
+        <>
+          <p>Work through bigger things with your tutor here: what to learn next, a new lesson, or a part that is not clicking.</p>
+          <button type="button" onClick={() => startSession('Based on my progress so far, what should I learn next? Propose the next lesson and draft it.')}>
+            Plan the next lesson
+          </button>
+        </>
+      )}
+    </section>
+  );
 
   return (
     <div className="project">
-      <header className="topbar">
-        <button type="button" className="ghost" onClick={onBack}>← Projects</button>
-        <span className="logo" aria-hidden>a</span>
-        <span className="project-title">{project.title}</span>
-        <nav>
-          <button type="button" aria-pressed={side === 'me'} onClick={() => setSide(side === 'me' ? 'none' : 'me')}>Me</button>
-          <button type="button" aria-pressed={side === 'history'} onClick={() => setSide(side === 'history' ? 'none' : 'history')}>
-            History{pending > 0 && <span className="badge" aria-label={`${pending} pending`}>{pending}</span>}
-          </button>
+      <header className="bar">
+        <button type="button" className="text" onClick={onBack}>
+          Projects
+        </button>
+        <span className="crumb-sep" aria-hidden>/</span>
+        <span className="crumb">{project.title}</span>
+        <nav className="margin-tabs" aria-label="Margin">
+          {(
+            [
+              ['tutor', 'Tutor'],
+              ['history', 'History'],
+              ['me', 'You'],
+            ] as const
+          ).map(([key, label]) => (
+            <button key={key} type="button" className="tab" aria-pressed={margin === key} onClick={() => setMargin(margin === key ? 'none' : key)}>
+              {key === 'tutor' && <PixelMark working={chatBusy} size={12} />}
+              {label}
+              {key === 'history' && pending > 0 && <span className="count" aria-label={`${pending} pending`}> {pending}</span>}
+            </button>
+          ))}
         </nav>
       </header>
-      <div className="workspace">
-        <nav className="lesson-list" aria-label="Lessons">
+      <div className={`workspace ${margin === 'none' ? '' : 'with-margin'}`}>
+        <nav className="toc" aria-label="Contents">
+          <button type="button" className="toc-tutor" aria-current={shown === 'session'} onClick={() => setView('session')}>
+            <PixelMark working={sessionBusy} size={16} />
+            {lessons.data?.length === 0 ? 'Interview' : 'Sessions'}
+            {sessionBusy && <span className="status">working</span>}
+          </button>
           <h2>Lessons</h2>
           <ol>
-            {lessons.data?.map((l) => (
+            {lessons.data?.map((l, i) => (
               <li key={l.id}>
-                <button type="button" aria-current={l.id === current} onClick={() => setLessonId(l.id)}>{l.title}</button>
+                <button
+                  type="button"
+                  aria-current={shown === 'lesson' && l.id === current}
+                  onClick={() => {
+                    setLessonId(l.id);
+                    setView('lesson');
+                  }}
+                >
+                  <span className="n">{String(i + 1).padStart(2, '0')}</span>
+                  {l.title}
+                </button>
               </li>
             ))}
           </ol>
-          {lessons.data?.length === 0 && <p className="hint">No lessons yet.</p>}
+          {lessons.data?.length === 0 && <p className="quiet">Lessons appear here once your tutor has written them.</p>}
         </nav>
-        <div className="lesson-pane" ref={lessonRef} onMouseUp={onMouseUp}>
-          <LessonActionsContext.Provider value={actions}>
-            {parsed?.success && <LessonView lesson={parsed.data} />}
-            {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}
-            {lessons.data?.length === 0 && (
-              <section className="onboarding">
-                <p className="eyebrow">New project</p>
-                <h1>{project.title}</h1>
-                <p className="goal">{project.goal}</p>
-                <p>
-                  Your tutor starts with a short conversation to find out what you already know, so the first lesson starts at the right level.
-                  Expect a few quick questions to answer or predict. It's fine not to know.
-                </p>
-                <button
-                  type="button"
-                  className="primary"
-                  onClick={() => actions.ask('Interview me briefly to find out what I already know for this project, then draft the first lesson.')}
-                >
-                  Start the interview
-                </button>
-              </section>
-            )}
-          </LessonActionsContext.Provider>
+        <div className="page">
+          <div hidden={shown !== 'session'}>
+            <Conversation
+              projectId={project.id}
+              lessonId={current}
+              request={sessionReq}
+              intro={intro}
+              backTo={current ? currentTitle : undefined}
+              onBack={() => setView('lesson')}
+              onActivity={showSession}
+              onBusy={setSessionBusy}
+              proposals={margin !== 'tutor'}
+            />
+          </div>
+          <div hidden={shown !== 'lesson'} ref={lessonRef} onMouseUp={onMouseUp}>
+            <LessonActionsContext.Provider value={actions}>
+              {parsed?.success && <LessonView lesson={parsed.data} />}
+              {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}
+            </LessonActionsContext.Provider>
+          </div>
           {chip && (
             <button
               type="button"
@@ -118,7 +192,7 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
               style={{ left: chip.x, top: chip.y }}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                setAskReq({ question: '', selection: chip.text, ...(chip.anchor ? { anchor: chip.anchor } : {}), nonce: Date.now() });
+                ask('', { selection: chip.text, ...(chip.anchor ? { anchor: chip.anchor } : {}) });
                 setChip(undefined);
               }}
             >
@@ -126,13 +200,14 @@ export function ProjectView({ project, profile, onProfile, onBack }: { project: 
             </button>
           )}
         </div>
-        {side !== 'none' && (
-          <div className="side-panel">
-            {side === 'history' ? <HistoryPanel /> : <MePanel profile={profile} onSettings={onProfile} />}
+        <aside className="margin" hidden={margin === 'none'}>
+          <div hidden={margin !== 'tutor'}>
+            <Conversation variant="chat" projectId={project.id} lessonId={current} request={chatReq} onActivity={showChat} onBusy={setChatBusy} />
           </div>
-        )}
+          {margin === 'history' && <HistoryPanel />}
+          {margin === 'me' && <MePanel profile={profile} onSettings={onProfile} />}
+        </aside>
       </div>
-      <AskPanel projectId={project.id} lessonId={current} request={askReq} />
     </div>
   );
 }
