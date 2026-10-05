@@ -1,0 +1,31 @@
+{
+  "name": "app-monorepo",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc -p packages/brand && tsc -p packages/core && tsc -p packages/agent-host && tsc -p packages/catalog && tsc -p packages/teacher-mcp && tsc -p packages/server && tsc -p packages/ui && tsc -p packages/desktop",
+    "check": "npm run typecheck && npm run coverage",
+    "build:ui": "npm run build -w packages/ui",
+    "desktop": "npm run build:ui && npm start -w packages/desktop",
+    "demo": "npm run build:ui && node scripts/demo-server.ts 47811",
+    "serve": "npm run build:ui && APORIA_UI_DIR=packages/ui/dist node packages/server/src/serve-main.ts",
+    "smoke:desktop": "npm run build:ui && npm run build -w packages/desktop && node packages/desktop/e2e/smoke.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@vitest/coverage-v8": "^5.0.3",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

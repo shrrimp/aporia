@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+dist/
+*.tsbuildinfo
+.DS_Store
+packages/desktop/rules/
+test-results/
+playwright-report/
+
+# Learner data never belongs in the repo (default location: ~/.local/share/aporia).
+# Guard against APORIA_DATA_DIR pointing inside the checkout.
+profiles/
+*.jsonl
+.lock
