@@ -172,7 +172,13 @@ export function Conversation({
   useEvent('ask.error', useCallback(({ askId, message }: ServerEvents['ask.error']) => apply({ t: 'end', askId, state: 'error', error: message }), [apply]));
 
   const send = useCallback(
-    async (question: string, sel?: { text: string; anchor?: string }, answers?: { askId: string; form: number; title: string; values: Record<string, FormAnswer> }) => {
+    async (
+      question: string,
+      sel?: { text: string; anchor?: string },
+      answers?: { askId: string; form: number; title: string; values: Record<string, FormAnswer> },
+      /** Where in the lesson it was asked, without a selection (e.g. a task's "I'm stuck"). */
+      at?: string,
+    ) => {
       const pending: Turn = {
         question,
         ...(sel ? { selection: sel.text } : {}),
@@ -191,7 +197,7 @@ export function Conversation({
           question,
           ...(lessonId ? { lessonId } : {}),
           ...(sel ? { selection: sel.text } : {}),
-          ...(sel?.anchor ? { anchor: sel.anchor } : {}),
+          ...((sel?.anchor ?? at) ? { anchor: sel?.anchor ?? at } : {}),
           thread,
           ...(answers ? { answers } : {}),
         });
@@ -207,7 +213,7 @@ export function Conversation({
     if (!request || handled.current === request.nonce) return;
     handled.current = request.nonce;
     const sel = request.selection ? { text: request.selection, ...(request.anchor ? { anchor: request.anchor } : {}) } : undefined;
-    if (request.question) void send(request.question, sel);
+    if (request.question) void send(request.question, sel, undefined, request.anchor);
     else if (sel) {
       setSelection(sel);
       onActivity();

@@ -322,6 +322,16 @@ figcaption { font: italic 0.9rem/1.5 var(--serif); color: var(--text-faint); mar
 .checkpoint-result .failures { margin: 0.3rem 0; padding-left: 1.2rem; }
 .test-output { max-height: 22rem; overflow: auto; font: 0.78rem/1.45 var(--mono); background: var(--raise); border: 1px solid var(--rule); border-radius: var(--r); padding: 0.6rem 0.75rem; white-space: pre-wrap; word-break: break-word; }
 .task .hint { margin-top: 0.6rem; }
+/* The hint ladder of a task: which levels were used, about what. */
+.hint-ladder { margin-top: 0.8rem; font-size: 0.88rem; }
+.hint-ladder ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; }
+.hint-level { padding: 0.12rem 0.5rem; border: 1px solid var(--rule-strong); border-radius: var(--r); color: var(--text-soft); }
+.hint-level .num { font-family: var(--mono); color: var(--accent); }
+.hint-level.l4, .hint-level.l5 { border-color: rgb(203 178 122 / 0.5); }
+.hint-ladder p { margin: 0.4rem 0 0; }
+.stuck { margin-top: 0.8rem; display: grid; gap: 0.4rem; }
+.stuck label { display: grid; gap: 0.3rem; font-size: 0.9rem; }
+.stuck-actions { display: flex; gap: 0.6rem; align-items: center; margin: 0; }
 
 /* ── the mark ──────────────────────────────────────────────────────────── */
 .pixelmark { flex: none; overflow: visible; }

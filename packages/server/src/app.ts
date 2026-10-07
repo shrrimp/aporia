@@ -23,8 +23,12 @@ import {
   matchesFilter,
   ratingConfidence,
   systemClock,
+  GATED_FROM,
+  HINT_LEVELS,
+  hintStates,
   type Author,
   type Clock,
+  type HintEvent,
   type HistoryFilter,
   type JsonValue,
   type LogEvent,
@@ -43,7 +47,7 @@ import { brain, projectCurriculum } from './maps.ts';
 import { listDir, listFolders, readText, writeText } from './workspace.ts';
 import { addSource, removeSource, Uploads } from './sources.ts';
 import { Drafts, PlaceStore } from './place.ts';
-import { askInput, methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents, type SourceDTO } from './protocol.ts';
+import { askInput, methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents, type SourceDTO, type TaskHintsDTO } from './protocol.ts';
 
 const LEARNER: Author = { kind: 'learner' };
 const SYSTEM: Author = { kind: 'system' };
@@ -364,6 +368,29 @@ export class AppService {
 
     'checkpoints.list': async ({ projectId, lessonId }) => this.#profile().checkpoints.list(await this.#project(projectId), lessonId),
 
+    'hints.get': async ({ projectId, lessonId }) => {
+      await this.#project(projectId);
+      const { events } = this.#profile().profile.journal;
+      const out: Record<string, TaskHintsDTO> = {};
+      for (const [, h] of hintStates(events, projectId, lessonId)) {
+        const given = events.filter((e): e is HintEvent => e.type === 'hint' && e.projectId === projectId && e.lessonId === lessonId && e.taskId === h.taskId);
+        out[h.taskId] = {
+          levels: given.map((e) => ({ level: e.level, name: HINT_LEVELS[e.level]!.name, ...(e.summary ? { summary: e.summary } : {}), at: e.at })),
+          max: h.max,
+          attemptSince: h.attemptSince,
+          nextNeedsAttempt: h.max + 1 >= GATED_FROM && h.max < 5 && !h.attemptSince,
+        };
+      }
+      return out;
+    },
+
+    'hints.attempt': async ({ projectId, lessonId, taskId, text }) => {
+      await this.#project(projectId);
+      await this.#profile().profile.hints.attempt(LEARNER, { projectId, lessonId, taskId, text });
+      this.#emit('changed', { what: 'hints' });
+      return { recorded: true };
+    },
+
     'checkpoints.run': async ({ projectId, lessonId, taskId }) => {
       const open = this.#profile();
       const project = await this.#project(projectId);
@@ -635,7 +662,7 @@ export class AppService {
   }
 
   #changedAll(): void {
-    for (const what of ['lessons', 'history', 'learner', 'projects', 'reviews'] as const) this.#emit('changed', { what });
+    for (const what of ['lessons', 'history', 'learner', 'projects', 'reviews', 'hints'] as const) this.#emit('changed', { what });
   }
 }
 

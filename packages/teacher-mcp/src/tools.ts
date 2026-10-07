@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { brand } from '@app/brand';
 import { catalogGuide, classifyWrite, formProblems, learnerForm, normalizeLesson, openTaskShapes, solutionFor, validateLesson, workspaceRelative, type Problem } from '@app/catalog';
 import {
+  HINT_LEVELS,
+  checkHint,
+  hintStates,
   SKILL_MAP_TARGET,
   SUITE_PLACEHOLDER,
   checkpointArgv,
@@ -144,7 +148,7 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
         difficulty: z.int().min(1).max(5).describe('1 easy … 3 standard … 5 hard'),
         evidenceType,
         outcome: z.number().min(0).max(1).describe('0 failure … 1 full success'),
-        hintLevel: z.int().min(0).max(5).default(0),
+        hintLevel: z.int().min(0).max(5).default(0).describe('The highest hint level given on this item (for a task, the app uses the hints it recorded)'),
         confidence: z.enum(['sure', 'think', 'guess']).optional(),
         transfer: z.boolean().default(false).describe('The item applied the idea to a new situation'),
         agreement: z.number().min(0).max(1).optional().describe('For your own judgements (explain-back): agreement between two independent scorings'),
@@ -154,7 +158,10 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
     async (args) =>
       guard(async () => {
         const { difficulty, ...rest } = args;
-        const e = await observations.recordEvidence({ ...stripUndefined(rest), author: ctx.agent, difficulty: difficultyFromLevel(difficulty) });
+        // Evidence on a task counts the hints given on it, whatever level was reported (W4).
+        const hinted = [...hintStates(ctx.profile.journal.events, ctx.projectId).entries()].find(([key, h]) => rest.itemId === key || rest.itemId === h.taskId);
+        const hintLevel = Math.max(rest.hintLevel, hinted?.[1].max ?? 0);
+        const e = await observations.recordEvidence({ ...stripUndefined(rest), hintLevel, author: ctx.agent, difficulty: difficultyFromLevel(difficulty) });
         return ok(`Recorded ${e.id}.`);
       }),
   );
@@ -304,6 +311,46 @@ export function buildTeacherServer(ctx: TeacherContext): McpServer {
 Send the learner to it with a Markdown link to \`${link}\`, e.g. [Try it in the lesson](${link}).` +
             (r.applied ? '' : ' It waits for their review: tell them to accept it first (it shows in the chat), then follow the link.'),
         );
+      }),
+  );
+
+  server.registerTool(
+    'record_hint',
+    {
+      description:
+        'Call this BEFORE giving a hint on a lesson task, with the ladder level you mean to use (0 reflect, 1 point, 2 Socratic question, ' +
+        '3 analogous worked example, 4 structure of their function with the key part blank, 5 principle stated plainly). The app checks ' +
+        'the ladder: start at L0 or L1, one level up at a time, L4+ only after a new attempt. If it refuses, give the level it allows.',
+      inputSchema: {
+        lessonId: z.string().max(64),
+        taskId: z.string().max(64),
+        level: z.int().min(0).max(5),
+        summary: z.string().trim().max(300).optional().describe('What the hint is about, in a few words (shown to the learner)'),
+      },
+    },
+    async ({ lessonId, taskId, level, summary }) =>
+      guard(async () => {
+        const now = await currentLesson(lessonId);
+        if (!now) return fail(`No lesson "${lessonId}".`);
+        const tasks = ((normalizeLesson(now.doc) as { sections?: { blocks?: { type?: unknown; id?: unknown; title?: unknown; files?: unknown }[] }[] }).sections ?? []).flatMap(
+          (x) => (x.blocks ?? []).filter((b) => b.type === 'task'),
+        );
+        const task = tasks.find((t) => t.id === taskId);
+        if (!task) return fail(`No task "${taskId}" in "${lessonId}". Its tasks: ${tasks.map((t) => t.id).join(', ') || 'none'}.`);
+        const files = await taskFiles(ctx, Array.isArray(task.files) ? task.files.filter((f): f is string => typeof f === 'string') : []);
+        const state = hintStates(ctx.profile.journal.events, ctx.projectId, lessonId).get(`${lessonId}/${taskId}`);
+        const changed = state !== undefined && files.some((f) => {
+          const before = state.files.find((b) => b.path === f.path);
+          return before !== undefined && before.sha !== f.sha;
+        });
+        const check = checkHint(state, level, changed);
+        if (!check.ok) {
+          const a = HINT_LEVELS[check.allowed]!;
+          return fail(`Not at L${level}. ${check.reason} Give an L${check.allowed} hint instead (${a.name}: ${a.does}), and tell the learner what unlocks the next level.`);
+        }
+        await ctx.profile.hints.record(ctx.agent, { projectId: ctx.projectId, lessonId, taskId, level, ...(summary ? { summary } : {}), files });
+        const l = HINT_LEVELS[level]!;
+        return ok(`L${level} (${l.name}) recorded for "${typeof task.title === 'string' ? task.title : taskId}": ${l.does}. Never the solution. When you record evidence on this task, its hint level counts.`);
       }),
   );
 
@@ -636,3 +683,22 @@ function stripUndefined<T extends Record<string, unknown>>(o: T): T {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
 }
 
+/** A task's files as they are now (content hashes), to tell later whether the learner changed them. */
+async function taskFiles(ctx: TeacherContext, files: readonly string[]): Promise<{ path: string; sha: string | null }[]> {
+  const { workspace } = await projectAccess(ctx.profile.changes, ctx.projectId);
+  if (!workspace) return [];
+  const out: { path: string; sha: string | null }[] = [];
+  for (const f of files.slice(0, 20)) {
+    const rel = workspaceRelative(f);
+    if (!rel) continue;
+    let text: string | null = null;
+    try {
+      text = await readDisk(await workspaceFile(workspace, rel));
+    } catch {
+      // outside the workspace, or unreadable: not a file to watch
+      continue;
+    }
+    out.push({ path: f, sha: text === null ? null : createHash('sha256').update(text).digest('hex').slice(0, 32) });
+  }
+  return out;
+}

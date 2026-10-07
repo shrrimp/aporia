@@ -166,6 +166,11 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }, op
             arguments: { itemId: 'h', kcs: [{ kc: 'quaternion.unit' }], difficulty: 3, evidenceType: 'production', outcome: 0.5, hintLevel: 2 },
           });
           await say('observed');
+        } else if (question.startsWith('hint me')) {
+          // "hint me 3": a hint at that level on the golden lesson's task.
+          const level = Number(question.split(' ')[2] ?? 1);
+          const r = await tool('record_hint', () => mcp.callTool({ name: 'record_hint', arguments: { lessonId: fourNumbers.id, taskId: 'step-2', level, summary: 'which side' } }));
+          await say((r.content as { text: string }[])[0]!.text);
         } else if (question.startsWith('long')) {
           // A long answer, then more work: the app sees a turn in progress.
           await say('x'.repeat(5000));

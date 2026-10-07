@@ -73,7 +73,7 @@ Make the tutor measurably good, not just functional.
 
 | # | Work |
 |---|---|
-| 2.1 | **Hint ladder enforced**: hint level recorded per task, attempt gating for L4+, level visible to the learner (H1–H2) |
+| 2.1 | **Hint ladder enforced**: hint level recorded per task, attempt gating for L4+, level visible to the learner (H1–H2). **Done**: the tutor calls `record_hint` before a hint and the app enforces the ladder (start at L0–L1, one level at a time, L4+ only after a checkpoint run, a change to the task's files or a written attempt); each task shows its ladder; evidence on the task, checkpoints included, counts the hints |
 | 2.2 | **Difficulty controller and activity mix fed into authoring**: scaffold level, success band and the mix of code and questions passed to the agent and checked by the validator (§3–§5), with bounded learner control. See below |
 | 2.3 | **Misconceptions** as first-class objects (suspected → resolved), surfaced on the Me page |
 | 2.4 | **Catalog v2**: `animation`, `simulation`, `manipulate` (drag), `math-input` with equivalence checking, `fill-in`, `sketch-answer` |

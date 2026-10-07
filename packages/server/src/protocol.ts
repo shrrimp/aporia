@@ -353,6 +353,17 @@ export interface DraftDTO {
   readonly at: string;
 }
 
+/** The hints given on one task (the hint ladder, pedagogy-model §6). */
+export interface TaskHintsDTO {
+  /** Each hint given, oldest first: its level, the level's name ("Question"), and what it was about. */
+  readonly levels: readonly { readonly level: number; readonly name: string; readonly summary?: string; readonly at: string }[];
+  readonly max: number;
+  /** The learner tried again since the last hint (ran the checkpoint or wrote an attempt). */
+  readonly attemptSince: boolean;
+  /** The next level up needs a new attempt first (L4 and above). */
+  readonly nextNeedsAttempt: boolean;
+}
+
 /** Every method: params schema + result type. */
 export const methods = {
   'app.info': z.strictObject({}),
@@ -377,6 +388,8 @@ export const methods = {
   'conversations.get': z.strictObject({ projectId: slugId, thread: z.enum(['chat', 'session']) }),
   'conversations.running': z.strictObject({ projectId: slugId, thread: z.enum(['chat', 'session']) }),
   'checkpoints.list': z.strictObject({ projectId: slugId, lessonId: slugId }),
+  'hints.get': z.strictObject({ projectId: slugId, lessonId: slugId }),
+  'hints.attempt': z.strictObject({ projectId: slugId, lessonId: slugId, taskId: slugId, text: z.string().trim().min(1).max(4000) }),
   'checkpoints.run': z.strictObject({ projectId: slugId, lessonId: slugId, taskId: slugId }),
   'checkpoints.cancel': z.strictObject({ projectId: slugId }),
   'history.list': z.strictObject({ filter: historyFilter.default({}) }),
@@ -433,6 +446,9 @@ export interface Results {
   /** Ids of the turns still in progress (the page was reloaded while the tutor worked). */
   'conversations.running': string[];
   'checkpoints.list': CheckpointsDTO;
+  /** By task id. */
+  'hints.get': Record<string, TaskHintsDTO>;
+  'hints.attempt': { recorded: boolean };
   'checkpoints.run': CheckpointRunDTO & { output: string; truncated: boolean };
   'checkpoints.cancel': { cancelled: boolean };
   'history.list': HistoryItemDTO[];
@@ -489,7 +505,7 @@ export interface ServerEvents {
   'ask.error': { askId: string; message: string };
   'agent.status': AgentStatusDTO;
   /** Something changed: the UI refreshes what it shows. */
-  changed: { what: 'profiles' | 'projects' | 'lessons' | 'history' | 'learner' | 'progress' | 'checkpoints' | 'reviews' | 'sources' };
+  changed: { what: 'profiles' | 'projects' | 'lessons' | 'history' | 'learner' | 'progress' | 'checkpoints' | 'reviews' | 'sources' | 'hints' };
 }
 
 export type ErrorCode = 'invalid_params' | 'not_found' | 'no_profile' | 'conflict' | 'dependants' | 'agent' | 'internal' | 'unknown_method';

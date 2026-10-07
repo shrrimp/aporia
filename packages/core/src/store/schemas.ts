@@ -158,6 +158,37 @@ export const checkpointEvent = z.strictObject({
   failures: z.array(z.string().max(300)).max(50).default([]),
 });
 
+const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
+
+/**
+ * A hint the tutor gave on a task, at a level of the hint ladder (pedagogy-model §6, H1). The
+ * app checks the level before it is recorded (one step at a time, L4+ only after an attempt).
+ * `files` are the task's files as they were (content hashes), to tell later whether the
+ * learner changed their code since.
+ */
+export const hintEvent = z.strictObject({
+  ...base,
+  id: idOf('ev'),
+  type: z.literal('hint'),
+  projectId: slug,
+  lessonId: slug,
+  taskId: slug,
+  level: z.int().min(0).max(5),
+  summary: z.string().max(300).optional(),
+  files: z.array(z.strictObject({ path: z.string().max(500), sha: z.string().max(64).nullable() })).max(20).default([]),
+});
+
+/** The learner wrote down what they tried on a task (an attempt, for the hint ladder's H2). */
+export const attemptEvent = z.strictObject({
+  ...base,
+  id: idOf('ev'),
+  type: z.literal('attempt'),
+  projectId: slug,
+  lessonId: slug,
+  taskId: slug,
+  text: z.string().min(1).max(4000),
+});
+
 const changeBase = { ...base, id: idOf('ev'), changeId: idOf('chg') };
 
 export const changeProposed = z.strictObject({
@@ -189,6 +220,8 @@ export const logEvent = z.discriminatedUnion('type', [
   revokeEvent,
   progressEvent,
   checkpointEvent,
+  hintEvent,
+  attemptEvent,
   changeProposed,
   changeApplied,
   changeClosed,
@@ -200,6 +233,8 @@ export type InsightObservation = z.output<typeof insightObservation>;
 export type RevokeEvent = z.output<typeof revokeEvent>;
 export type ProgressEvent = z.output<typeof progressEvent>;
 export type CheckpointEvent = z.output<typeof checkpointEvent>;
+export type HintEvent = z.output<typeof hintEvent>;
+export type AttemptEvent = z.output<typeof attemptEvent>;
 export type ChangeProposed = z.output<typeof changeProposed>;
 export type ChangeApplied = z.output<typeof changeApplied>;
 export type ChangeClosed = z.output<typeof changeClosed>;

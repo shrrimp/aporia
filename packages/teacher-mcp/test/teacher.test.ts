@@ -85,6 +85,7 @@ describe('teacher MCP server', () => {
       'list_sources',
       'read_source',
       'record_evidence',
+      'record_hint',
       'record_insight',
       'record_instruction',
       'revise_lesson',

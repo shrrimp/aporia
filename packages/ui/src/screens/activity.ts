@@ -21,6 +21,7 @@ const TEACHING: Readonly<Record<string, Activity>> = {
   draft_lesson: { label: 'Writing a lesson', kind: 'lesson' },
   revise_lesson: { label: 'Revising the lesson', kind: 'lesson' },
   add_to_lesson: { label: 'Adding practice to the lesson', kind: 'lesson' },
+  record_hint: { label: 'Choosing a hint level', kind: 'note' },
   get_lesson: { label: 'Rereading the lesson', kind: 'lesson' },
   list_lessons: { label: 'Looking over your lessons', kind: 'lesson' },
   get_skill_map: { label: 'Reading your skill map', kind: 'context' },

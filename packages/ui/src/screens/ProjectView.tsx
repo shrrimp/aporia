@@ -18,6 +18,7 @@ import { AgentBadge, AgentNotice, useAgentStatus } from './AgentStatus.tsx';
 import { Editor } from '../editor/Editor.tsx';
 import { ErrorBoundary } from '../ErrorBoundary.tsx';
 import { CheckpointContext, type CheckpointActions } from '../lesson/checkpoints.tsx';
+import { HintsContext, type HintActions } from '../lesson/hints.tsx';
 
 type Margin = 'none' | 'tutor' | 'history' | 'me' | 'project';
 type View = 'session' | 'lesson' | 'review' | 'path';
@@ -80,6 +81,16 @@ export function ProjectView({
       cancel: () => void rpc.call('checkpoints.cancel', { projectId: project.id }).catch(() => undefined),
     }),
     [checkpointList.data, rpc, project.id, current],
+  );
+  const hintList = useQuery('hints.get', current ? { projectId: project.id, lessonId: current } : null, ['hints', 'lessons']);
+  const hints: HintActions = useMemo(
+    () => ({
+      data: hintList.data,
+      attempt: async (taskId, text) => {
+        await rpc.call('hints.attempt', { projectId: project.id, lessonId: current!, taskId, text });
+      },
+    }),
+    [hintList.data, rpc, project.id, current],
   );
   const parsed = useMemo(() => (lessonDoc.data ? lessonSchema.safeParse(normalizeLesson(lessonDoc.data)) : undefined), [lessonDoc.data]);
   // Code in the tutor's replies that would give away an open task of this lesson is hidden (P1).
@@ -368,10 +379,12 @@ export function ProjectView({
               <LessonActionsContext.Provider value={actions}>
                 <ProgressContext.Provider value={progress}>
                   <CheckpointContext.Provider value={checkpoints}>
-                    {/* Blocks read their saved state when they mount: wait for it, and remount per lesson. */}
-                    <ErrorBoundary area="this lesson" resetKey={current}>
-                      {parsed?.success && savedProgress.data && <LessonView key={current} lesson={parsed.data} />}
-                    </ErrorBoundary>
+                    <HintsContext.Provider value={hints}>
+                      {/* Blocks read their saved state when they mount: wait for it, and remount per lesson. */}
+                      <ErrorBoundary area="this lesson" resetKey={current}>
+                        {parsed?.success && savedProgress.data && <LessonView key={current} lesson={parsed.data} />}
+                      </ErrorBoundary>
+                    </HintsContext.Provider>
                   </CheckpointContext.Provider>
                 </ProgressContext.Provider>
                 {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}

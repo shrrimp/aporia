@@ -12,6 +12,7 @@ export * from './store/journal.ts';
 export * from './store/observations.ts';
 export * from './store/progress.ts';
 export * from './store/checkpoints.ts';
+export * from './store/hints.ts';
 export * from './checkpoints/command.ts';
 export * from './checkpoints/parse.ts';
 export * from './checkpoints/run.ts';

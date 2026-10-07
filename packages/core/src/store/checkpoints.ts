@@ -1,6 +1,7 @@
 import { difficultyFromLevel } from '../learner/params.ts';
 import type { Author, CheckpointEvent, LogEvent } from './schemas.ts';
 import type { Journal } from './journal.ts';
+import { maxHintLevel } from './hints.ts';
 
 export type CheckpointRun = Omit<CheckpointEvent, 'type' | 'id' | 'at' | 'author'>;
 
@@ -55,6 +56,8 @@ export class Checkpoints {
           difficulty: difficultyFromLevel(3),
           evidenceType: 'checkpoint',
           outcome: 1,
+          // Reached with hints: credit is reduced by the highest one given (W4).
+          hintLevel: maxHintLevel(this.journal.events, run.projectId, run.lessonId, run.taskId),
           note: `checkpoint ${run.counts ? `${run.counts.passed}/${run.counts.total}` : ''} reached (expected ${run.expect.passed}/${run.expect.of}) after ${(before?.runs.length ?? 0) + 1} run(s)`,
         });
       }

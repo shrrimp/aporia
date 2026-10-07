@@ -11,6 +11,8 @@ import {
   assessmentTarget,
   band,
   checkpointRuns,
+  GATED_FROM,
+  hintStates,
   curriculumDoc,
   curriculumTarget,
   type Curriculum,
@@ -97,6 +99,18 @@ export function checkpointSummary(events: Parameters<typeof checkpointRuns>[0], 
     .join('\n');
 }
 
+/** Hints given per task so far, and what the ladder allows next (pedagogy-model §6). */
+export function hintSummary(events: Parameters<typeof hintStates>[0], projectId: string, max = 10): string {
+  const tasks = [...hintStates(events, projectId).entries()].slice(-max);
+  if (tasks.length === 0) return 'No hints given yet. Before any hint on a task, call record_hint with its level.';
+  return tasks
+    .map(([key, h]) => {
+      const next = h.max >= 5 ? 'top of the ladder' : h.max + 1 >= GATED_FROM && !h.attemptSince ? `L${h.max + 1} needs a new attempt first` : `next may be L${h.max + 1}`;
+      return `- ${key}: ${h.levels.map((l) => `L${l}`).join(', ')}${h.attemptSince ? ' (tried again since)' : ''}; ${next}`;
+    })
+    .join('\n');
+}
+
 /** Items due for review, for the next warm-up: the tutor reuses them instead of inventing new ones. */
 export function reviewSummary(r: ProjectReviews, max = 8): string {
   if (r.dueCount === 0) return r.nextDue ? `Nothing due. Next item due ${r.nextDue.slice(0, 10)}.` : 'Nothing answered yet, so nothing to review.';
@@ -170,6 +184,9 @@ export async function teachingContext(ctx: TeacherContext): Promise<string> {
     '',
     `# Checkpoints (the learner's tests, run by the app)`,
     checkpointSummary(ctx.profile.journal.events, ctx.projectId),
+    '',
+    `# Hints given (the hint ladder, checked by the app)`,
+    hintSummary(ctx.profile.journal.events, ctx.projectId),
     '',
     `# Due for review (scheduled by the app)`,
     reviewSummary(reviews),

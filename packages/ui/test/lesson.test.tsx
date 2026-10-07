@@ -50,7 +50,8 @@ describe('LessonView', () => {
     const user = userEvent.setup();
     const { a } = withActions(<LessonView lesson={golden} />);
     await user.click(screen.getByRole('button', { name: /I'm stuck/ }));
-    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/stuck on task "integratePosition"/), { anchor: 'task:step-2' });
+    await user.click(screen.getByRole('button', { name: 'Ask for a hint' }));
+    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/stuck on task "integratePosition"\. Give me the lowest/), { anchor: 'task:step-2' });
     await user.type(screen.getByLabelText('Your explanation'), 'Rotate into the parent frame at the midpoint orientation.');
     await user.click(screen.getByRole('button', { name: 'Send to your tutor' }));
     expect(a.ask).toHaveBeenLastCalledWith(expect.stringMatching(/Explain-back[\s\S]*Rubric: velocity must be rotated[\s\S]*send me back to the lesson/), { anchor: expect.stringMatching(/\/\d+$/) });

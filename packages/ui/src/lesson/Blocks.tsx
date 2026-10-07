@@ -2,6 +2,7 @@ import { useState } from 'react';
 import katex from 'katex';
 import { blockKey, taskKey, type Component } from '@app/catalog';
 import { useAnchor, useSaved } from './progress.tsx';
+import { HintLadder, StuckButton } from './hints.tsx';
 import { Markdown } from './Markdown.tsx';
 import { Diagram } from './Diagram.tsx';
 import { Plot } from './Plot.tsx';
@@ -189,9 +190,8 @@ function Task({ doc }: { doc: Of<'task'> }) {
         </details>
       )}
       {doc.checkpoint && <Checkpoint taskId={doc.id} suite={doc.checkpoint.suite} expect={doc.checkpoint.expect} />}
-      <button type="button" className="hint" onClick={() => actions.ask(`I'm stuck on task "${doc.title}". Give me the lowest hint level that helps.`, { anchor: `task:${doc.id}` })}>
-        I'm stuck: give me a hint
-      </button>
+      <HintLadder taskId={doc.id} />
+      <StuckButton taskId={doc.id} title={doc.title} ask={(q) => actions.ask(q, { anchor: `task:${doc.id}` })} />
       <label className="task-done">
         <input
           type="checkbox"

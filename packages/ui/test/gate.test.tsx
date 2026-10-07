@@ -57,6 +57,7 @@ describe('the solution gate', () => {
     );
     await screen.findByRole('heading', { level: 1, name: fourNumbers.title });
     await user.click(screen.getByRole('button', { name: /give me a hint/ }));
+    await user.click(screen.getByRole('button', { name: 'Ask for a hint' }));
     await screen.findByText(/I'm stuck on task/);
     act(() => r.emit('ask.event', { askId: 'a1', event: { kind: 'text', text: SOLUTION } }));
     expect(await screen.findByText(/may be the answer to/)).toBeInTheDocument();

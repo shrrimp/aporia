@@ -250,3 +250,60 @@ describe('claims', () => {
     expect(text(await call('get_skill_map'))).toMatch(/quat\.slerp: Slerp \(\w+, practising/);
   });
 });
+
+describe('the hint ladder', () => {
+  const hint = (level: number, extra: Record<string, unknown> = {}) => call('record_hint', { lessonId: fourNumbers.id, taskId: 'step-2', level, ...extra });
+
+  it('starts low, climbs one level at a time, and opens L4 only after an attempt', async () => {
+    await setProject(undefined);
+    await mkdir(path.join(ws, 'physics', 'joints'), { recursive: true });
+    await writeFile(path.join(ws, 'physics', 'joints', 'Joint.cpp'), 'void integratePosition() {}\n');
+    await call('draft_lesson', { lesson: fourNumbers });
+
+    expect(text(await hint(3))).toMatch(/Not at L3\. Start low[\s\S]*Give an L1 hint instead \(Point:/);
+    expect(text(await hint(1, { summary: 'which side the exponential goes' }))).toMatch(/^L1 \(Point\) recorded for "integratePosition"/);
+    expect(text(await hint(3))).toMatch(/One level at a time: the highest so far is L1/);
+    await hint(2);
+    await hint(3);
+    const gated = await hint(4);
+    expect(gated.isError).toBe(true);
+    expect(text(gated)).toMatch(/new attempt[\s\S]*Give an L3 hint instead/);
+
+    // The learner changes their code: L4 opens.
+    await writeFile(path.join(ws, 'physics', 'joints', 'Joint.cpp'), 'void integratePosition() { /* tried */ }\n');
+    expect(text(await hint(4))).toMatch(/^L4 \(Structure\) recorded/);
+    expect(text(await hint(5))).toMatch(/new attempt/);
+    // A written attempt opens it too.
+    await profile.hints.attempt(learner, { projectId: 'hmp', lessonId: fourNumbers.id, taskId: 'step-2', text: 'I multiply on the left now' });
+    expect(text(await hint(5))).toMatch(/^L5 \(Principle\) recorded/);
+
+    expect(text(await call('get_teaching_context'))).toMatch(/# Hints given[^\n]*\n- hmp-09-four-numbers\/step-2: L1, L2, L3, L4, L5; top of the ladder/);
+    const recorded = profile.journal.events.filter((e) => e.type === 'hint');
+    expect(recorded.map((e) => (e as { level: number }).level)).toEqual([1, 2, 3, 4, 5]);
+    expect(recorded[0]).toMatchObject({ summary: 'which side the exponential goes', files: [{ path: 'physics/joints/Joint.cpp', sha: expect.stringMatching(/^[0-9a-f]{32}$/) }] });
+
+    // Evidence on the task counts the hints, whatever level the tutor reports.
+    await call('record_evidence', { itemId: 'step-2', kcs: [{ kc: 'quaternion.exp-map-side' }], difficulty: 3, evidenceType: 'production', outcome: 1 });
+    expect(profile.journal.events.findLast((e) => e.type === 'evidence')).toMatchObject({ hintLevel: 5 });
+    await call('record_evidence', { itemId: 'w1', kcs: [{ kc: 'quaternion.unit' }], difficulty: 2, evidenceType: 'production', outcome: 1, hintLevel: 1 });
+    expect(profile.journal.events.findLast((e) => e.type === 'evidence')).toMatchObject({ hintLevel: 1 });
+  });
+
+  it('says what it needs: a known lesson and task; files outside the workspace are not watched', async () => {
+    expect(text(await call('get_teaching_context'))).toMatch(/No hints given yet\. Before any hint on a task, call record_hint/);
+    expect(text(await hint(0))).toMatch(/No lesson "hmp-09-four-numbers"/);
+    await call('draft_lesson', { lesson: fourNumbers });
+    expect(text(await call('record_hint', { lessonId: fourNumbers.id, taskId: 'nope', level: 0 }))).toMatch(/No task "nope"[^\n]*Its tasks: step-2/);
+    // No workspace: nothing to hash, the ladder still applies.
+    expect(text(await hint(0))).toMatch(/^L0 \(Reflect\) recorded/);
+    expect(profile.journal.events.findLast((e) => e.type === 'hint')).toMatchObject({ files: [] });
+
+    const odd = structuredClone(fourNumbers) as unknown as { sections: { blocks: Record<string, unknown>[] }[] };
+    (odd.sections[3]!.blocks[0]!['files'] as string[]).push('../outside.cpp', 'physics/missing.cpp');
+    await setProject(undefined);
+    await call('draft_lesson', { lesson: odd });
+    await hint(1);
+    expect(profile.journal.events.findLast((e) => e.type === 'hint')).toMatchObject({ files: [{ path: 'physics/joints/Joint.cpp', sha: null }, { path: 'physics/missing.cpp', sha: null }] });
+    expect(text(await call('get_teaching_context'))).toMatch(/step-2: L0, L1; next may be L2/);
+  });
+});

@@ -185,6 +185,9 @@ describe('misc branches', () => {
     await user.click(screen.getByRole('button', { name: 'Check' }));
     render(<Block doc={{ type: 'task', id: 't', title: 'T', scaffold: 2, kcs: ['k'], files: [], goal: 'g', traps: [] } as Component} />);
     await user.click(screen.getByRole('button', { name: /I'm stuck/ }));
+    // Outside a project, what was tried is only sent with the question.
+    await user.type(screen.getByLabelText(/What have you tried/), 'x');
+    await user.click(screen.getByRole('button', { name: 'Ask for a hint' }));
   });
 
   it('order drills move down; numeric needs a number; long selections are truncated', async () => {
