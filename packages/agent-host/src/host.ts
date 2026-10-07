@@ -21,8 +21,50 @@ export type HostEvent =
   | { readonly kind: 'blocked-fs'; readonly op: 'read' | 'write'; readonly path: string }
   | { readonly kind: 'stop'; readonly reason: StopReason };
 
+/**
+ * Why the agent could not do what was asked, in terms the learner can act on: the agent is
+ * not installed (or cannot start), it is not logged in, it stopped, or something else.
+ */
+export type AgentProblem = 'missing' | 'login' | 'stopped' | 'other';
+
 export class AgentHostError extends Error {
   override readonly name = 'AgentHostError';
+  readonly problem: AgentProblem;
+  constructor(message: string, problem: AgentProblem = 'other') {
+    super(message);
+    this.problem = problem;
+  }
+}
+
+/** ACP's "authentication required" error code. */
+const AUTH_REQUIRED = acp.RequestError.authRequired().code;
+
+/** Map any failure from starting or talking to the agent to a problem the learner can act on. */
+export function agentProblem(err: unknown): AgentProblem {
+  if (err instanceof AgentHostError) return err.problem;
+  if (err instanceof acp.RequestError && err.code === AUTH_REQUIRED) return 'login';
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === AUTH_REQUIRED) return 'login';
+  if (code === 'ENOENT' || code === 'EACCES' || code === 'MODULE_NOT_FOUND') return 'missing';
+  return 'other';
+}
+
+/**
+ * Who the agent is logged in as, reduced to what the app shows: the kind ("none" = not logged
+ * in) and a label such as "Claude Pro". Never an email or an organisation (P5).
+ */
+export interface AuthStatus {
+  readonly kind: string;
+  readonly label: string;
+}
+
+/** The Claude adapter pushes its login state on this extension notification (`_meta.authStatus`). */
+export const AUTH_STATUS_METHOD = '_auth/status_update';
+
+function parseAuthStatus(params: unknown): AuthStatus | undefined {
+  const a = (params as { authStatus?: { kind?: unknown; label?: unknown } } | null)?.authStatus;
+  if (typeof a?.kind !== 'string') return undefined;
+  return { kind: a.kind.slice(0, 40), label: typeof a.label === 'string' ? a.label.slice(0, 80) : a.kind.slice(0, 40) };
 }
 
 interface SessionEntry {
@@ -40,14 +82,24 @@ export class AgentHost {
   #connection: acp.ClientConnection | undefined;
   #child: ChildProcess | undefined;
   #init: InitializeResponse | undefined;
+  #auth: AuthStatus | undefined;
+  readonly #authListeners = new Set<(s: AuthStatus) => void>();
 
   private constructor(spec?: AgentSpec) {
     this.#spec = spec;
   }
 
-  /** Start an agent process and connect to it over stdio. */
+  /**
+   * Start an agent process and connect to it over stdio. A program that is not installed, or a
+   * process that dies before answering, rejects with an {@link AgentHostError} saying which.
+   */
   static async spawn(spec: AgentSpec): Promise<AgentHost> {
-    const launch = spec.launch();
+    let launch;
+    try {
+      launch = spec.launch();
+    } catch (err) {
+      throw new AgentHostError(`${spec.displayName} could not be found: ${(err as Error).message}`, agentProblem(err) === 'missing' ? 'missing' : 'other');
+    }
     const child = spawn(launch.command, [...launch.args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...launch.env },
@@ -55,13 +107,35 @@ export class AgentHost {
     const host = new AgentHost(spec);
     host.#child = child;
     child.stderr?.resume(); // agent logs are not protocol traffic
+    // Without a listener, a failed spawn (e.g. ENOENT) is an uncaught exception that takes the
+    // whole core down. It becomes a rejection of whatever is waiting instead.
+    const failed = new Promise<never>((_, reject) => {
+      child.once('error', (err: NodeJS.ErrnoException) => {
+        const e = new AgentHostError(`${spec.displayName} could not be started (${err.code ?? err.message}). Is it installed?`, agentProblem(err) === 'missing' ? 'missing' : 'other');
+        host.#connection?.close(e);
+        reject(e);
+      });
+      child.once('exit', (code, signal) => {
+        const e = new AgentHostError(`${spec.displayName} stopped (${signal ?? `exit code ${code}`})`, 'stopped');
+        host.#connection?.close(e);
+        reject(e);
+      });
+    });
+    failed.catch(() => undefined); // only awaited during start-up
     const stream = acp.ndJsonStream(
       Writable.toWeb(child.stdin!) as WritableStream<Uint8Array>,
       Readable.toWeb(child.stdout!) as ReadableStream<Uint8Array>,
     );
     host.#connection = host.#app().connect(stream);
-    child.once('exit', () => host.#connection?.close(new AgentHostError('agent process exited')));
-    await host.#initialize();
+    try {
+      await Promise.race([host.#initialize(), failed]);
+    } catch (err) {
+      // The connection usually closes a moment before the process says why: wait briefly for it.
+      const reason = await Promise.race([failed.catch((e: unknown) => e), new Promise((r) => setTimeout(r, 250))]);
+      await host.close();
+      if (reason instanceof AgentHostError) throw reason;
+      throw new AgentHostError(`${spec.displayName} did not start: ${(err as Error).message}`, agentProblem(err));
+    }
     return host;
   }
 
@@ -78,6 +152,17 @@ export class AgentHost {
     return this.#init!;
   }
 
+  /** The agent's login, if it reports one (undefined: not reported, which is not "logged out"). */
+  get authStatus(): AuthStatus | undefined {
+    return this.#auth;
+  }
+
+  /** Be told when the agent's login changes. Returns an unsubscribe function. */
+  onAuthStatus(listener: (s: AuthStatus) => void): () => void {
+    this.#authListeners.add(listener);
+    return () => void this.#authListeners.delete(listener);
+  }
+
   /** Open a session. `scope` is enforced on every request the agent makes in it. */
   async newSession(opts: SessionOptions, scope: SessionScope): Promise<string> {
     const meta = this.#spec?.sessionMeta(opts);
@@ -89,6 +174,29 @@ export class AgentHost {
     });
     this.#sessions.set(res.sessionId, { scope, listeners: new Set() });
     return res.sessionId;
+  }
+
+  /** Whether the agent can pick up a session from an earlier run (ACP `sessionCapabilities.resume`). */
+  get canResume(): boolean {
+    return this.#init?.agentCapabilities?.sessionCapabilities?.resume != null;
+  }
+
+  /**
+   * Reopen a session from an earlier run of the agent, with its memory (the agent keeps its own
+   * transcript). The options are the session's, as when it was created; `scope` is enforced
+   * again. Rejects when the agent cannot resume it (unknown id, no support): start a new one.
+   */
+  async resumeSession(sessionId: string, opts: SessionOptions, scope: SessionScope): Promise<void> {
+    if (!this.canResume) throw new AgentHostError('this agent cannot resume sessions');
+    const meta = this.#spec?.sessionMeta(opts);
+    await this.#ctx().request(acp.methods.agent.session.resume, {
+      sessionId,
+      cwd: opts.cwd,
+      additionalDirectories: [...opts.additionalDirectories],
+      mcpServers: [...opts.mcpServers],
+      ...(meta === undefined ? {} : { _meta: meta }),
+    });
+    this.#sessions.set(sessionId, { scope, listeners: new Set() });
   }
 
   /** Send a prompt; events stream to `onEvent` until the turn stops. */
@@ -172,7 +280,13 @@ export class AgentHost {
           'this app never lets the agent write files; use the teaching tools to propose changes',
         );
       })
-      .onNotification(acp.methods.client.session.update, async ({ params }) => this.#onUpdate(params));
+      .onNotification(acp.methods.client.session.update, async ({ params }) => this.#onUpdate(params))
+      .onNotification(AUTH_STATUS_METHOD, (p: unknown) => p, async ({ params }) => {
+        const status = parseAuthStatus(params);
+        if (!status) return;
+        this.#auth = status;
+        this.#authListeners.forEach((l) => l(status));
+      });
   }
 
   async #onPermission(params: RequestPermissionRequest) {

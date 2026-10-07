@@ -43,7 +43,7 @@ tags. This is ⚙ only, fully unit-tested, and replayable from the event log.
 | Checkpoint step (tests) | 1.0 | pass = 1, else fraction of the step's tests | Objective, step-level (T1) |
 | Recall / production drill, `math-input`, `fill-in`, `sketch-answer` | 1.0 | exact or ⚙-checkable (equivalence / tolerance) | R1 |
 | Prediction (before a reveal) | 0.7 | correct / incorrect | G3 |
-| Recognition (multiple choice) | 0.5 | correct / incorrect | Weaker than production (R1, R2) |
+| Recognition (multiple choice) | 0.5 | correct / incorrect; with a reason tier, 1 for answer and reason, 0.25 for the answer alone (elimination or a guess), 0 otherwise ⚠ | Weaker than production (R1, R2); the reason tier separates knowing from eliminating (R8) |
 | Explain-back | 0.6 × agreement | 🧠 rubric 0–5, scored **twice**; if the two scores differ by >1, a third; agreement = 1 − spread/5 | AI8 |
 | Self-rating | 0.2, prior only | – | M2 |
 

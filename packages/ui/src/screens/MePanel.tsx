@@ -10,7 +10,7 @@ const MASTERY: Record<string, string> = {
 };
 
 /** The open learner model: what the app believes, with how sure it is, and the settings. */
-export function MePanel({ profile, onSettings }: { profile: ProfileDTO; onSettings: (p: ProfileDTO) => void }) {
+export function MePanel({ profile, onSettings, onBrain }: { profile: ProfileDTO; onSettings: (p: ProfileDTO) => void; onBrain?: () => void }) {
   const rpc = useRpc();
   const learner = useQuery('learner.summary', {}, ['learner']);
   const d = learner.data;
@@ -24,6 +24,13 @@ export function MePanel({ profile, onSettings }: { profile: ProfileDTO; onSettin
         </p>
       )}
       <h3>Skills</h3>
+      {onBrain && (
+        <p>
+          <button type="button" className="text" onClick={onBrain}>
+            See every skill on the map of your brain
+          </button>
+        </p>
+      )}
       {d?.kcs.length ? (
         <table className="skills">
           <thead>

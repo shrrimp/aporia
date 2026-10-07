@@ -127,9 +127,38 @@ export const explorable = z.strictObject({
 });
 
 const difficulty = z.int().min(1).max(5).describe('1 = easy … 3 = standard … 5 = hard');
-const itemBase = { id: slug, prompt: md(2000), kcs: z.array(kc).min(1).max(6), difficulty, why: md(2000), transfer: z.boolean().default(false) };
+const itemBase = {
+  id: slug,
+  prompt: md(2000),
+  kcs: z.array(kc).min(1).max(6),
+  difficulty,
+  why: md(2000),
+  transfer: z.boolean().default(false),
+  /** A warm-up item that reviews an earlier one ("lesson-id/item-id"): its answer reschedules that item. */
+  reviewOf: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9-]{0,63}\/[a-z0-9][a-z0-9-]{0,63}$/)
+    .optional()
+    .describe('For warm-up items taken from the due-for-review list: the id shown there'),
+};
 export const drillItem = z.discriminatedUnion('kind', [
-  z.strictObject({ ...itemBase, kind: z.literal('mcq'), options: z.array(z.string().max(300)).min(2).max(6), answer: z.int().min(0) }),
+  z.strictObject({
+    ...itemBase,
+    kind: z.literal('mcq'),
+    options: z.array(z.string().max(300)).min(2).max(6),
+    answer: z.int().min(0),
+    /**
+     * Two-tier item (R8): after the answer, the learner picks why. Wrong reasons are the
+     * misconceptions to look for. Credit needs both, so elimination alone is not taken for knowing.
+     */
+    reason: z
+      .strictObject({
+        prompt: z.string().max(300).default('Why?'),
+        options: z.array(z.string().max(300)).min(2).max(5),
+        answer: z.int().min(0),
+      })
+      .optional(),
+  }),
   z.strictObject({ ...itemBase, kind: z.literal('numeric'), answer: z.number(), tolerance: z.number().nonnegative().default(1e-6) }),
   z.strictObject({ ...itemBase, kind: z.literal('short'), answer: z.string().max(500).describe('Reference answer; judged by rubric') }),
   z.strictObject({ ...itemBase, kind: z.literal('order'), lines: z.array(z.string().max(200)).min(2).max(15).describe('Correct order; shuffled for the learner') }),

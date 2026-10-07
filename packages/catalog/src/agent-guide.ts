@@ -71,12 +71,18 @@ ${JSON.stringify(EXAMPLE)}
 
 ## Activities
 - drill { purpose: warmup|pretest|practice|exit, confidence (default true), items: [...] }
-  item common: id, prompt, kcs, difficulty 1–5 (3 = standard), why, transfer?
-  mcq{options, answer (index)} numeric{answer, tolerance?} short{answer (reference)} order{lines (correct order)}
+  item common: id, prompt, kcs, difficulty 1–5 (3 = standard), why, transfer?, reviewOf? ("lesson/item" from the due-for-review list)
+  mcq{options, answer (index), reason?{prompt?, options, answer}} numeric{answer, tolerance?} short{answer (reference)} order{lines (correct order)}
+  Choosing a format (R8): to check understanding, prefer short (explain, predict in words) or numeric. Use mcq where
+  recall would mostly fail (pretests, beginners), with distractors that are real misconceptions, and add a reason tier:
+  the right reason and wrong ones drawn from misconceptions. Credit needs both; a right answer with a wrong reason is
+  a guess or elimination, and shows you which misconception to address.
 - predict { prompt, options?, reveal, kcs }
 - think-first { prompt, reveal }
 - explain-back { prompt, kcs, rubric: [points a good answer covers] }
 - task { id, title, scaffold 0–4, kcs, files?, goal, contract?, traps?, checkpoint?: { suite, expect: {passed, of} } }
+  checkpoint.suite: a plain test name or filter (letters, digits, . _ : / * ? - …). The app runs the learner's own
+  test command; the suite goes where they put {suite} in it, otherwise the whole suite runs and counts.
 - utility-link { md, prompt? }  open-loop { md }
 
 ## Expression language

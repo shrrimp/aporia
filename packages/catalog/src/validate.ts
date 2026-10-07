@@ -213,6 +213,7 @@ class Checker {
         c.items.forEach((item, i) => {
           const p = `${path}.items[${i}]`;
           if (item.kind === 'mcq' && item.answer >= item.options.length) this.error(p, 'answer index is out of range');
+          if (item.kind === 'mcq' && item.reason && item.reason.answer >= item.reason.options.length) this.error(`${p}.reason`, 'reason answer index is out of range');
           if (item.kind === 'order' && new Set(item.lines).size !== item.lines.length) this.error(p, 'order lines must be distinct');
         });
         return;

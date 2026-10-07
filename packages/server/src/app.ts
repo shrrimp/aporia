@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { brand } from '@app/brand';
 import { claudeAgent, type AgentSpec } from '@app/agent-host';
@@ -10,6 +11,8 @@ import {
   DependantsError,
   ProfileNotFoundError,
   ProfileStore,
+  applyPatch,
+  roadmapTarget,
   activeObservations,
   band,
   deriveLearnerState,
@@ -26,23 +29,36 @@ import {
   type JsonValue,
   type LogEvent,
   type OpenProfile,
+  type PatchOp,
   type ProfileFile,
+  splitCommand,
 } from '@app/core';
-import { lesson as lessonSchema, lessonCompletion, normalizeLesson } from '@app/catalog';
-import { TeacherHttpServer, lessonTarget, lessonsDir, projectTarget, registerLessonValidator } from '@app/teacher-mcp';
+import { agentPermissions, formAnswer, lessonCompletion, scoreProbe, type LearnerForm } from '@app/catalog';
+import { TeacherHttpServer, lessonTarget, projectLessons, projectReviews, projectTarget, readRoadmap, readSources, registerValidators, sourceText, isAgentFileTarget, type AgentFileDoc, type SourceEntry } from '@app/teacher-mcp';
 import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
-import { recap, Transcripts, type TranscriptEntry } from './transcripts.ts';
-import { methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents } from './protocol.ts';
+import { cutOff, recap, Transcripts, type TranscriptEntry } from './transcripts.ts';
+import { CheckpointRunner } from './checkpoint-runner.ts';
+import { brain, projectCurriculum } from './maps.ts';
+import { listDir, listFolders, readText, writeText } from './workspace.ts';
+import { addSource, removeSource, Uploads } from './sources.ts';
+import { Drafts, PlaceStore } from './place.ts';
+import { askInput, methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents, type SourceDTO } from './protocol.ts';
 
 const LEARNER: Author = { kind: 'learner' };
 const SYSTEM: Author = { kind: 'system' };
+
+/** Streamed text is saved at least this often during a turn. */
+const TEXT_SAVE_MS = 2000;
+const TEXT_SAVE_CHARS = 4000;
 
 export interface AppOptions {
   readonly dataRoot: string;
   readonly clock?: Clock;
   readonly agent?: AgentSpec;
   readonly hostFactory?: HostFactory;
+  /** How long a check waits for an agent to report its login (tests shorten it). */
+  readonly loginWaitMs?: number;
 }
 
 type Emit = <E extends keyof ServerEvents>(event: E, data: ServerEvents[E]) => void;
@@ -52,6 +68,8 @@ interface OpenState {
   settings: ProfileDTO['settings'];
   agents: AgentSessions;
   transcripts: Transcripts;
+  drafts: Drafts;
+  checkpoints: CheckpointRunner;
 }
 
 const projectFile = z.strictObject({
@@ -62,6 +80,8 @@ const projectFile = z.strictObject({
   why: z.string(),
   workspace: z.string().optional(),
   testCommand: z.string().optional(),
+  /** What the tutor may do in the workspace (absent on older projects: the defaults apply). */
+  agent: agentPermissions.optional(),
   createdAt: z.string(),
 });
 
@@ -75,16 +95,23 @@ function slugify(title: string): string {
 /** The app service: everything the UI can do, independent of the transport. */
 export class AppService {
   readonly #store: ProfileStore;
+  readonly #place: PlaceStore;
   readonly #spec: AgentSpec;
   readonly #factory: HostFactory;
+  readonly #loginWaitMs: number | undefined;
   readonly #emitters = new Set<Emit>();
   readonly #asks = new Map<string, () => Promise<void>>();
+  /** Turns in progress, by ask id: where they are saved, and how to save their streamed text now. */
+  readonly #running = new Map<string, { readonly projectId: string; readonly thread: 'chat' | 'session'; readonly flush: () => void }>();
+  readonly #uploads = new Uploads();
   #teacher: TeacherHttpServer | undefined;
   #open: OpenState | undefined;
 
   constructor(opts: AppOptions) {
     this.#store = new ProfileStore(opts.dataRoot, opts.clock ?? systemClock);
+    this.#place = new PlaceStore(opts.dataRoot);
     this.#spec = opts.agent ?? claudeAgent;
+    this.#loginWaitMs = opts.loginWaitMs;
     // The real agent process; exercised by scripts/spike-*.ts rather than CI (it needs a login).
     /* v8 ignore next */
     this.#factory = opts.hostFactory ?? ((spec) => AgentHost.spawn(spec));
@@ -106,8 +133,9 @@ export class AppService {
 
   async #closeProfile(): Promise<void> {
     if (!this.#open) return;
-    const { profile, agents, transcripts } = this.#open;
+    const { profile, agents, transcripts, checkpoints } = this.#open;
     this.#open = undefined;
+    checkpoints.cancelAll();
     await agents.close();
     await transcripts.flush();
     await profile.close();
@@ -146,10 +174,17 @@ export class AppService {
       if (this.#open?.profile.profile.id === profileId) return toProfileDTO(await this.#store.read(profileId));
       await this.#closeProfile();
       const profile = await this.#store.open(profileId);
-      registerLessonValidator(profile.changes);
+      registerValidators(profile.changes);
       this.#teacher ??= await TeacherHttpServer.start();
-      const state = { profile, settings: profile.profile.settings, agents: undefined as unknown as AgentSessions, transcripts: new Transcripts(profile.dir) };
-      state.agents = new AgentSessions(this.#spec, this.#factory, this.#teacher, profile, () => state.settings);
+      const state = {
+        profile,
+        settings: profile.profile.settings,
+        agents: undefined as unknown as AgentSessions,
+        transcripts: new Transcripts(profile.dir),
+        drafts: new Drafts(profile.dir),
+        checkpoints: new CheckpointRunner(profile),
+      };
+      state.agents = new AgentSessions(this.#spec, this.#factory, this.#teacher, profile, () => state.settings, (status) => this.#emit('agent.status', status));
       this.#open = state;
       return toProfileDTO(profile.profile);
     },
@@ -178,6 +213,7 @@ export class AppService {
 
     'projects.create': async (input) => {
       const { profile } = this.#profile();
+      checkTestCommand(input.testCommand);
       const id = slugify(input.title);
       const doc = {
         schemaVersion: 1 as const,
@@ -194,18 +230,41 @@ export class AppService {
       return dto as ProjectDTO;
     },
 
+    'projects.update': async ({ projectId, agent, ...fields }) => {
+      const { profile } = this.#profile();
+      const current = await this.#project(projectId);
+      checkTestCommand(fields.testCommand);
+      const patch: PatchOp[] = [];
+      if (agent !== undefined && JSON.stringify(agent) !== JSON.stringify(current.agent)) {
+        patch.push({ op: current.agent ? 'replace' : 'add', path: '/agent', value: agent as unknown as JsonValue });
+      }
+      for (const [key, value] of Object.entries(fields) as [keyof typeof fields, string | undefined][]) {
+        if (value === undefined) continue;
+        const has = current[key] !== undefined;
+        if (value === '' && (key === 'workspace' || key === 'testCommand')) {
+          if (has) patch.push({ op: 'remove', path: `/${key}` });
+        } else if (value !== current[key]) {
+          patch.push({ op: has ? 'replace' : 'add', path: `/${key}`, value });
+        }
+      }
+      if (patch.length > 0) {
+        await profile.changes.propose({ author: LEARNER, target: projectTarget(projectId), patch, reason: 'project settings' }, 'auto');
+        this.#emit('changed', { what: 'projects' });
+        this.#emit('changed', { what: 'checkpoints' });
+      }
+      return this.#project(projectId);
+    },
+
     'lessons.list': async ({ projectId }) => {
       const { profile } = this.#profile();
-      const prefix = `${lessonsDir(projectId)}/`;
-      const targets = [...new Set(profile.changes.list({ status: 'applied' }).map((c) => c.target))].filter((t) => t.startsWith(prefix)).sort();
       const progress = projectProgress(profile.journal.events, projectId);
-      const out = [];
-      for (const t of targets) {
-        const l = lessonSchema.safeParse(normalizeLesson(await profile.changes.read(t)));
-        if (l.success)
-          out.push({ id: l.data.id, title: l.data.title, kind: l.data.kind, estimateMin: l.data.estimateMin, progress: lessonCompletion(l.data, progress[l.data.id] ?? {}) });
-      }
-      return out;
+      return (await projectLessons(profile, projectId)).map((l) => ({
+        id: l.id,
+        title: l.title,
+        kind: l.kind,
+        estimateMin: l.estimateMin,
+        progress: lessonCompletion(l, progress[l.id] ?? {}),
+      }));
     },
 
     'lessons.get': async ({ projectId, lessonId }) => {
@@ -231,7 +290,8 @@ export class AppService {
       const { profile } = this.#profile();
       const e = await profile.observations.recordEvidence({
         author: SYSTEM,
-        itemId: `${a.lessonId}/${a.itemId}`,
+        itemId: a.reviewOf ?? `${a.lessonId}/${a.itemId}`,
+        projectId: a.projectId,
         kcs: a.kcs.map((kc) => ({ kc, weight: 1 })),
         difficulty: difficultyFromLevel(a.difficulty),
         evidenceType: a.evidenceType,
@@ -240,7 +300,49 @@ export class AppService {
         ...(a.confidence ? { confidence: a.confidence } : {}),
       });
       this.#emit('changed', { what: 'learner' });
+      this.#emit('changed', { what: 'reviews' });
       return { id: e.id };
+    },
+
+    'reviews.queue': async ({ projectId }) => {
+      const { profile } = this.#profile();
+      await this.#project(projectId);
+      const r = await projectReviews(profile, projectId, profile.journal.now());
+      return {
+        items: r.due.map((d) => ({ itemId: d.itemId, lessonId: d.lessonId, lessonTitle: d.lessonTitle, item: d.item, retrievability: d.retrievability, reviews: d.reviews })),
+        dueCount: r.dueCount,
+        ...(r.nextDue ? { nextDue: r.nextDue } : {}),
+      };
+    },
+
+    'curriculum.get': async ({ projectId }) => projectCurriculum(this.#profile().profile, await this.#project(projectId)),
+
+    'roadmap.setStatus': async ({ projectId, milestoneId, status }) => {
+      const { profile } = this.#profile();
+      await this.#project(projectId);
+      const roadmap = await readRoadmap(profile.changes, projectId);
+      if (!roadmap.milestones[milestoneId]) throw new AppError('not_found', `no milestone ${milestoneId}`);
+      if (roadmap.milestones[milestoneId].status !== status) {
+        await profile.changes.propose(
+          { author: LEARNER, target: roadmapTarget(projectId), patch: [{ op: 'replace', path: `/milestones/${milestoneId}/status`, value: status }], reason: `roadmap, ${milestoneId}: marked ${status}` },
+          'auto',
+        );
+        this.#emitMany(['history', 'lessons']);
+      }
+      return { ok: true as const };
+    },
+
+    'brain.get': async () => brain(this.#profile().profile, await this.#handlers['projects.list']({})),
+
+    'reviews.summary': async () => {
+      const { profile } = this.#profile();
+      const now = profile.journal.now();
+      const out: Results['reviews.summary'] = {};
+      for (const p of await this.#handlers['projects.list']({})) {
+        const r = await projectReviews(profile, p.id, now, 0);
+        out[p.id] = { due: r.dueCount, ...(r.nextDue ? { nextDue: r.nextDue } : {}) };
+      }
+      return out;
     },
 
     'progress.get': async ({ projectId, lessonId }) => ({ ...lessonProgress(this.#profile().profile.journal.events, projectId, lessonId) }),
@@ -251,7 +353,31 @@ export class AppService {
       return { saved: e !== undefined };
     },
 
-    'conversations.get': async ({ projectId, thread }) => this.#profile().transcripts.read(projectId, thread),
+    'conversations.get': async ({ projectId, thread }) => {
+      // Text streamed but not saved yet is saved first, so a reloaded page misses nothing.
+      for (const r of this.#running.values()) if (r.projectId === projectId && r.thread === thread) r.flush();
+      return this.#profile().transcripts.read(projectId, thread);
+    },
+
+    'conversations.running': async ({ projectId, thread }) =>
+      [...this.#running].filter(([, r]) => r.projectId === projectId && r.thread === thread).map(([askId]) => askId),
+
+    'checkpoints.list': async ({ projectId, lessonId }) => this.#profile().checkpoints.list(await this.#project(projectId), lessonId),
+
+    'checkpoints.run': async ({ projectId, lessonId, taskId }) => {
+      const open = this.#profile();
+      const project = await this.#project(projectId);
+      this.#emit('changed', { what: 'checkpoints' });
+      try {
+        const result = await open.checkpoints.run(project, lessonId, taskId);
+        if (!result.cancelled) this.#emit('changed', { what: 'learner' });
+        return result;
+      } finally {
+        this.#emit('changed', { what: 'checkpoints' });
+      }
+    },
+
+    'checkpoints.cancel': async ({ projectId }) => ({ cancelled: this.#profile().checkpoints.cancel(projectId) }),
 
     'history.list': async ({ filter }) => historyOf(this.#profile().profile, filter),
 
@@ -287,6 +413,26 @@ export class AppService {
       return { id };
     },
 
+    'history.diff': async ({ id }) => {
+      const { profile } = this.#profile();
+      const c = profile.changes.get(id);
+      if (!c) throw new AppError('not_found', `no change ${id}`);
+      if (c.status !== 'proposed') throw new AppError('conflict', 'only a change waiting for review can be compared');
+      const before = await profile.changes.read(c.target);
+      let after: JsonValue;
+      try {
+        after = applyPatch(before, c.patch).doc;
+      } catch (err) {
+        throw new AppError('conflict', `this change no longer applies: ${(err as Error).message}`);
+      }
+      if (isAgentFileTarget(c.target)) {
+        const b = before as AgentFileDoc | null;
+        const a = after as AgentFileDoc | null;
+        return { kind: 'file' as const, path: (a ?? b)!.path, before: b ? b.content : a!.original, after: a ? a.content : b!.original };
+      }
+      return { kind: 'document' as const, target: c.target, before, after };
+    },
+
     'history.undoWhere': async ({ filter }) => {
       const { profile } = this.#profile();
       const f = cleanFilter(filter);
@@ -298,21 +444,25 @@ export class AppService {
 
     ask: async (q) => {
       const open = this.#profile();
-      const project = (await this.#handlers['projects.list']({})).find((p) => p.id === q.projectId);
-      if (!project) throw new AppError('not_found', `no project ${q.projectId}`);
+      const project = await this.#project(q.projectId);
       const askId = randomUUID();
-      const prompt = buildAskPrompt(q);
       // Everything shown is also saved, so the conversation is still there after a restart.
       // Streamed text is gathered and written between other events, not chunk by chunk.
-      // Only for the recap: an unreadable history must not stop the learner from asking.
+      // Only for the recap and probes: an unreadable history must not stop the learner from asking.
       const earlier = await open.transcripts.read(project.id, q.thread).catch(() => []);
+      const scored = q.answers ? await this.#scoreProbes(open, project.id, earlier, q.answers) : '';
+      const cut = cutOff(earlier, new Set(this.#running.keys()));
+      const prompt = [cut, buildAskPrompt(q), scored].filter(Boolean).join('\n\n');
       const save = (entries: TranscriptEntry[]) =>
         void open.transcripts.append(project.id, q.thread, entries).catch((err: unknown) => console.error(`could not save the conversation: ${(err as Error).message}`));
       let text = '';
+      let savedAt = Date.now();
       const flush = () => {
         if (text) save([{ t: 'event', askId, event: { kind: 'text', text } }]);
         text = '';
+        savedAt = Date.now();
       };
+      this.#running.set(askId, { projectId: project.id, thread: q.thread, flush });
       save([
         ...(q.answers ? [{ t: 'submitted' as const, askId: q.answers.askId, form: q.answers.form, answers: q.answers.values }] : []),
         {
@@ -327,8 +477,11 @@ export class AppService {
       ]);
       const onEvent = (event: TurnEvent) => {
         this.#emit('ask.event', { askId, event: event as AskEvent });
-        if (event.kind === 'text') text += event.text;
-        else if (event.kind !== 'thought') {
+        if (event.kind === 'text') {
+          text += event.text;
+          // A long answer is saved as it streams: a crash loses a few seconds of it at most.
+          if (Date.now() - savedAt > TEXT_SAVE_MS || text.length > TEXT_SAVE_CHARS) flush();
+        } else if (event.kind !== 'thought') {
           flush();
           save([{ t: 'event', askId, event: event as AskEvent }]);
         }
@@ -338,11 +491,13 @@ export class AppService {
         .then(
           (stopReason) => {
             flush();
+            this.#running.delete(askId); // before anyone hears it is done
             save([{ t: 'end', askId, state: stopReason === 'cancelled' ? 'cancelled' : 'done' }]);
             this.#emit('ask.done', { askId, stopReason });
           },
           (err: unknown) => {
             flush();
+            this.#running.delete(askId);
             save([{ t: 'end', askId, state: 'error', error: (err as Error).message }]);
             this.#emit('ask.error', { askId, message: (err as Error).message });
           },
@@ -354,6 +509,73 @@ export class AppService {
       return { askId };
     },
 
+    'sources.list': async ({ projectId }) => {
+      const { profile } = this.#profile();
+      await this.#project(projectId);
+      return Object.entries(await readSources(profile, projectId))
+        .map(([id, e]) => sourceDTO(id, e))
+        .sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+    },
+
+    'sources.begin': async ({ projectId, name, size }) => {
+      await this.#project(projectId);
+      return { uploadId: this.#uploads.begin(projectId, name, size) };
+    },
+
+    'sources.chunk': async ({ uploadId, index, data }) => ({ received: this.#uploads.chunk(uploadId, index, data) }),
+
+    'sources.finish': async ({ uploadId }) => {
+      const { profile } = this.#profile();
+      const file = this.#uploads.finish(uploadId);
+      const { id, entry, existed } = await addSource(profile, file.projectId, file.name, file.data, LEARNER);
+      if (!existed) this.#emitMany(['sources', 'history']);
+      return { ...sourceDTO(id, entry), existed };
+    },
+
+    'sources.remove': async ({ projectId, sourceId }) => {
+      await removeSource(this.#profile().profile, projectId, sourceId, LEARNER);
+      this.#emitMany(['sources', 'history']);
+      return { ok: true as const };
+    },
+
+    'sources.text': async ({ projectId, sourceId }) => {
+      const text = await sourceText(this.#profile().profile, projectId, sourceId);
+      if (text === undefined) throw new AppError('not_found', `no source ${sourceId}`);
+      const shown = 200_000;
+      return { text: text.slice(0, shown), truncated: text.length > shown };
+    },
+
+    'folders.list': async ({ path: at }) => {
+      const r = await listFolders(at ?? homedir());
+      return { path: r.path, folders: r.folders, ...(r.parent ? { parent: r.parent } : {}) };
+    },
+
+    'workspace.list': async ({ projectId, dir }) => listDir(await this.#workspace(projectId), dir),
+
+    'workspace.read': async ({ projectId, path }) => readText(await this.#workspace(projectId), path),
+
+    'workspace.write': async ({ projectId, path, content, baseVersion }) => writeText(await this.#workspace(projectId), path, content, baseVersion),
+
+    'place.get': async () => this.#place.get(),
+
+    'place.set': async (change) => this.#place.set(change),
+
+    'drafts.list': async ({ projectId }) => {
+      await this.#project(projectId);
+      return this.#profile().drafts.list(projectId);
+    },
+
+    'drafts.set': async ({ projectId, path, content, baseVersion }) => {
+      await this.#project(projectId);
+      const open = this.#profile();
+      await open.drafts.set(projectId, path, content, baseVersion, open.profile.journal.now().toISOString());
+      return { saved: true };
+    },
+
+    'agent.status': async () => this.#profile().agents.status,
+
+    'agent.check': async () => this.#profile().agents.check(this.#loginWaitMs),
+
     'ask.cancel': async ({ askId }) => {
       const cancel = this.#asks.get(askId);
       if (!cancel) throw new AppError('not_found', `no running question ${askId}`);
@@ -362,10 +584,81 @@ export class AppService {
     },
   };
 
+  /**
+   * Probes in a form the learner just answered are scored by the app (P3): the form is taken
+   * from the saved conversation, not from the learner's app, and each answer is checked before
+   * it is read. Evidence is recorded once per question. Returns a note for the tutor.
+   */
+  async #scoreProbes(open: OpenState, projectId: string, earlier: readonly TranscriptEntry[], answers: NonNullable<z.output<typeof askInput>['answers']>): Promise<string> {
+    const form = earlier.filter((e) => e.t === 'event' && e.askId === answers.askId && e.event.kind === 'form').map((e) => (e as { event: { form: LearnerForm } }).event.form)[answers.form];
+    if (!form) return '';
+    const { observations, journal } = open.profile;
+    const lines: string[] = [];
+    for (const question of form.questions) {
+      if (!question.probe) continue;
+      const parsed = formAnswer.safeParse(answers.values[question.id]);
+      const outcome = parsed.success ? scoreProbe(question, parsed.data) : undefined;
+      if (outcome === undefined) continue;
+      const itemId = `probe/${answers.askId.slice(0, 36)}/${question.id}`;
+      if (journal.events.some((e) => e.type === 'evidence' && e.itemId === itemId)) continue;
+      const selfRating = question.kind === 'scale';
+      await observations.recordEvidence({
+        author: SYSTEM,
+        itemId,
+        projectId,
+        kcs: question.probe.kcs.map((kc) => ({ kc, weight: 1 })),
+        difficulty: difficultyFromLevel(question.probe.difficulty),
+        evidenceType: selfRating ? 'self-rating' : 'probe',
+        outcome,
+      });
+      lines.push(`- [${question.id}] ${selfRating ? `self-rating ${Math.round(outcome * 4) + 1}/5 (a prior only)` : outcome === 1 ? 'right' : outcome === 0 ? 'wrong' : `${Math.round(outcome * 100)}% right`}`);
+    }
+    if (lines.length === 0) return '';
+    this.#emit('changed', { what: 'learner' });
+    return `<scored-by-the-app>\nThe app scored these probes and recorded the evidence; do not record them again:\n${lines.join('\n')}\n</scored-by-the-app>`;
+  }
+
+  async #workspace(projectId: string): Promise<string> {
+    const project = await this.#project(projectId);
+    if (!project.workspace) throw new AppError('conflict', 'This project has no workspace folder. Set one in the project settings.');
+    return project.workspace;
+  }
+
+  async #project(projectId: string): Promise<ProjectDTO> {
+    const project = (await this.#handlers['projects.list']({})).find((p) => p.id === projectId);
+    if (!project) throw new AppError('not_found', `no project ${projectId}`);
+    return project;
+  }
+
+  #emitMany(whats: readonly ServerEvents['changed']['what'][]): void {
+    for (const what of whats) this.#emit('changed', { what });
+  }
+
   #changedAll(): void {
-    for (const what of ['lessons', 'history', 'learner', 'projects'] as const) this.#emit('changed', { what });
+    for (const what of ['lessons', 'history', 'learner', 'projects', 'reviews'] as const) this.#emit('changed', { what });
   }
 }
+
+/** A test command that can never run is refused when it is set, not when it is first run. */
+function checkTestCommand(command: string | undefined): void {
+  if (!command) return;
+  try {
+    splitCommand(command);
+  } catch (err) {
+    throw new AppError('invalid_params', (err as Error).message);
+  }
+}
+
+const sourceDTO = (id: string, e: SourceEntry): SourceDTO => ({
+  id,
+  name: e.name,
+  kind: e.kind,
+  size: e.size,
+  chars: e.chars,
+  addedAt: e.addedAt,
+  ...(e.pages !== undefined ? { pages: e.pages } : {}),
+  ...(e.note ? { note: e.note } : {}),
+});
 
 function cleanFilter(f: Record<string, string | undefined>): HistoryFilter {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined)) as HistoryFilter;

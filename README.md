@@ -36,7 +36,9 @@ npm run demo          # UI with a scripted tutor and a sample lesson (no agent, 
 ```
 
 Data lives in `~/.local/share/aporia` (Linux), `~/Library/Application Support/Aporia` (macOS)
-or `%APPDATA%\Aporia` (Windows). Override it with `APORIA_DATA_DIR`.
+or `%APPDATA%\Aporia` (Windows). Override it with `APORIA_DATA_DIR`. If something goes wrong
+(a blank window, a crash), `logs/app.log` in that folder says what happened; Ctrl+R (F5)
+reloads the window without losing anything.
 
 ## Development
 
@@ -44,6 +46,8 @@ or `%APPDATA%\Aporia` (Windows). Override it with `APORIA_DATA_DIR`.
 npm run check         # strict typecheck + all tests + coverage thresholds (run before committing)
 npm test              # tests only
 npm run smoke:desktop # launches the real Electron app (hidden window) and drives it
+npm run e2e:desktop   # smoke + editor + crash recovery (crashed page, Ctrl+R, restart) in Electron
+WORKSPACE=/copy/of/a/repo node packages/desktop/e2e/open-files.ts  # opens every file in the editor
 node scripts/spike-teacher.ts   # real Claude ↔ app tools round trip (uses your subscription)
 node scripts/spike-lesson.ts    # real Claude authors a lesson end to end (a few minutes)
 ```

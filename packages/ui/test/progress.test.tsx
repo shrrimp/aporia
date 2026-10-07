@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { lesson as lessonSchema, lessonUnits } from '@app/catalog';
 import type { JsonValue, TranscriptEntry } from '@app/server/protocol';
 import { fourNumbers } from '../../catalog/fixtures/four-numbers.ts';
 import { LessonView } from '../src/lesson/LessonView.tsx';
 import { ProgressContext } from '../src/lesson/progress.tsx';
-import { Conversation } from '../src/screens/Conversation.tsx';
+import { CONTINUE, Conversation } from '../src/screens/Conversation.tsx';
 import { ProjectView } from '../src/screens/ProjectView.tsx';
 import { applyEntry, replay } from '../src/screens/turns.ts';
 import { RpcProvider } from '../src/hooks.tsx';
@@ -186,6 +186,43 @@ describe('saved conversations', () => {
     expect(screen.getByText('Sent my answers to “Quick”')).toBeInTheDocument();
     expect(screen.getByText(/Cut off: the app closed/)).toBeInTheDocument();
     expect(r.calls.find((c) => c.method === 'conversations.get')!.params).toEqual({ projectId: 'p', thread: 'session' });
+  });
+
+  it('offers to continue a cut-off turn', async () => {
+    const user = userEvent.setup();
+    const r = new FakeRpc()
+      .handle('history.list', () => [])
+      .handle('conversations.get', () => saved)
+      .handle('conversations.running', () => [])
+      .handle('ask', () => ({ askId: 'a3' }));
+    render(
+      <RpcProvider client={r.asClient()}>
+        <Conversation projectId="p" lessonId={undefined} request={undefined} />
+      </RpcProvider>,
+    );
+    await user.click(await screen.findByRole('button', { name: 'Continue' }));
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ question: CONTINUE, thread: 'session' });
+    // Working again: no second offer.
+    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+  });
+
+  it('keeps a turn that is still running when the page reloads, and follows it', async () => {
+    const busy: boolean[] = [];
+    const r = new FakeRpc()
+      .handle('history.list', () => [])
+      .handle('conversations.get', () => saved)
+      .handle('conversations.running', () => ['a2']);
+    render(
+      <RpcProvider client={r.asClient()}>
+        <Conversation projectId="p" lessonId={undefined} request={undefined} onBusy={(b) => busy.push(b)} />
+      </RpcProvider>,
+    );
+    expect(await screen.findByText('Thanks, drafting')).toBeInTheDocument();
+    expect(screen.queryByText(/Cut off/)).not.toBeInTheDocument();
+    await waitFor(() => expect(busy.at(-1)).toBe(true));
+    act(() => r.emit('ask.event', { askId: 'a2', event: { kind: 'tool', id: 't', title: 'Draft the lesson', status: 'completed' } }));
+    act(() => r.emit('ask.done', { askId: 'a2', stopReason: 'end_turn' }));
+    await waitFor(() => expect(busy.at(-1)).toBe(false));
   });
 
   it('sends form answers with their structure, so the summary comes back after a restart', async () => {

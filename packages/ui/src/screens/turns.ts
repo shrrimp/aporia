@@ -83,6 +83,6 @@ export function applyEntry(turns: readonly Turn[], e: TranscriptEntry): Turn[] {
 }
 
 /** A saved conversation, replayed. Turns that never ended were cut off by a restart. */
-export function replay(entries: readonly TranscriptEntry[]): Turn[] {
-  return entries.reduce(applyEntry, [] as Turn[]).map((t) => (t.state === 'running' ? { ...t, state: 'interrupted' } : t));
+export function replay(entries: readonly TranscriptEntry[], running: ReadonlySet<string> = new Set()): Turn[] {
+  return entries.reduce(applyEntry, [] as Turn[]).map((t) => (t.state === 'running' && !(t.askId && running.has(t.askId)) ? { ...t, state: 'interrupted' } : t));
 }

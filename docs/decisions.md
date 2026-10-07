@@ -52,24 +52,26 @@ The forward-looking plan lives in [`roadmap.md`](roadmap.md). This table records
 | 1. Core: store, journal, changes + undo/redo, learner engine, profiles | **Done** (`packages/core`) |
 | 2. Component catalog v1, validator, expression language, renderers | **Done** (`packages/catalog`, `packages/ui/src/lesson`) |
 | 3. Agent host, teaching MCP tools, ask-about-selection, session modes | **Done** (`agent-host`, `teacher-mcp`, `server`, UI) |
-| 4. Project creation, interview, curriculum graph | **Partial**: project creation and an interview via chat. No structured interview or KC graph yet |
-| 5. Checkpoints (test runner), build ladder, review queue (FSRS UI), difficulty controller in authoring, help-policy enforcement | **Partial**: engine pieces exist in core. Not yet: test runner, review screen, hint-level gate |
+| 4. Project creation, interview, curriculum graph | **Done**: interview forms with app-scored probes, `assessment.json`, the profile skill map, project curricula and the Path page |
+| 5. Checkpoints (test runner), build ladder, review queue (FSRS UI), difficulty controller in authoring, help-policy enforcement | **Partial**: test runner, ladder and review screen done. Not yet: difficulty controller in authoring, hint-level gate (Phase 2) |
 | 6. History / proposed changes UI, Me page, profiles | **Done**. Encryption **not yet** |
 | 7. Source import | **Not started** |
 | 8. Packaging for 3 OSes, agent eval suite | **Partial**: Electron shell + smoke test. No installers or eval suite yet |
 | 9. Post-MVP: Claude Code plugin, HMP lesson import, mobile, languages | Not started |
 
 ### Known gaps (next up, in order)
-1. **Checkpoint runner**: run the project's test command, parse results, record evidence (T1).
-2. **Solution reveal gate** in the chat (finding 3 in architecture §8).
-3. **Review queue** screen driven by FSRS. Warm-ups pull due items.
-4. **Structured interview** producing `assessment.json` and a KC graph.
-5. **Embedded editor** (Monaco). External editors already work, since the agent reads the workspace.
-6. **Source import** (PDF/Markdown).
-7. Profile **encryption** (opt-in).
+1. **Dogfood Phase 1** on Heavy Metal Physics (the roadmap's exit test), with the real agent.
+2. **Hint ladder enforced** and the difficulty controller fed into authoring (roadmap 2.1, 2.2).
+3. **Misconceptions** as first-class objects (2.3).
+4. **Source import** (PDF/Markdown).
+5. Profile **encryption** (opt-in).
 
 ## Decision log
 - 2026-10-05: D1, D8, D11, D12, D13 (round 1).
 - 2026-10-05: D2, D4–D7, D9, D10, D14–D20 (round 2).
 - 2026-10-05: D3, D21 (AGPL-3.0), D22 (working name Aporia). Building started (roadmap step 1).
 - 2026-10-05: Steps 0–3 and 6 done; the real-Claude spikes passed (architecture §8).
+- 2026-10-06: Phase 1 built (roadmap 1.1–1.8) and a first brain view (2.8). Checkpoints run the
+  learner's own command, never a shell, and never one the tutor changed. The editor writes the
+  workspace only on the learner's explicit save. The skill map is per profile: the tutor describes
+  it, code colours it from evidence.

@@ -81,7 +81,9 @@ data. Draft tool list:
 | `record_evidence(kc, kind, outcome, note)` | Log an observation (drill answer, explanation quality, hint used) | Feeds the deterministic tracer |
 | `draft_lesson(lesson)` / `revise_lesson(id, patch)` | Write lesson content | Compiled and validated; rejected if it violates the policy (e.g. a solution leak check on stubs) |
 | `stage_tests(lesson, files)` | Add checkpoint tests | Tests go to a staging dir, not into the learner's code |
-| `run_checkpoint(lesson, step)` | Run the staged tests, get pass counts | Run by core, results are facts |
+| `run_checkpoint(lesson, step)` | Run the staged tests, get pass counts | Run by core, results are facts. *Built differently:* only the learner starts a run (from the task); the tutor reads the results in its context, so the agent never executes anything |
+| `update_skill_map` / `get_skill_map` | Describe the profile's skills, groups, links and suggestions | Validated (acyclic prerequisites); never holds a level |
+| `set_curriculum` / `save_assessment` | The project's goals and rolling plan; what the interview found | Whole documents, reviewed or auto-applied, undoable |
 | `give_hint(task, level)` | Records which hint-ladder level was used | The agent writes the hint; core enforces the level order |
 | `search_research(topic)` | Query the bundled, read-only research base | Lets the agent cite *why* it teaches a certain way |
 | `search_resources(topic)` | Curated external links stored per project | |
@@ -111,6 +113,24 @@ against the user. Bypassing them on purpose is possible, and that's fine.
 5. Content policy: chat replies run through a cheap deterministic check (e.g. a large code
    block that closely matches the open task's expected shape triggers a "this looks like a
    solution" reveal gate in the UI). This is heuristic, so it is the last layer, not the first.
+
+### The three places the core writes outside the profile
+- **Checkpoint runs** execute the learner's test command in the workspace: split into words,
+  never through a shell, with a timeout and an output cap, in its own process group. A task's
+  suite is only substituted where the learner wrote `{suite}`, and only if it is a plain test
+  name. A project whose test command was last changed by the agent is refused.
+- **The embedded editor** saves a file only on the learner's explicit save, inside the workspace
+  (symlink escapes refused), and only over the version the learner opened: a change made
+  meanwhile in another editor is reported, never overwritten silently. The agent has no route to
+  either.
+- **The tutor's files**, only where the learner allowed it (project settings: tests in a folder of
+  their own, tools such as a viewer in named folders, edits to the learner's files only if
+  allowed and then always reviewed). The agent's own write tools stay disabled; it writes through
+  one MCP tool, `write_file`, which checks the permission, refuses code that implements an open
+  task (the solution gate, on the file), and records each write as a change: reviewed or applied
+  per the learner's setting, undoable, and checked against the disk first, so a change the
+  learner made meanwhile is never overwritten. With "measure" allowed, the tutor can run the
+  learner's test command and the commands they listed (same runner: no shell, bounded).
 
 ## 3. Components (core)
 

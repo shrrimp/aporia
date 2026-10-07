@@ -28,6 +28,17 @@ export interface ChangeState {
 /** Returns human/agent-readable problems with a document; empty = valid. */
 export type DocumentValidator = (target: string, doc: JsonValue) => string[];
 
+/**
+ * Something outside the profile that follows a document: e.g. a file in the learner's workspace
+ * written by the tutor. `check` runs before anything is recorded and throws when the effect
+ * cannot happen (say, the file changed since); `apply` runs after the document is written.
+ */
+export interface DocumentEffect {
+  matches(target: string): boolean;
+  check(target: string, before: JsonValue, after: JsonValue): Promise<void>;
+  apply(target: string, before: JsonValue, after: JsonValue): Promise<void>;
+}
+
 export class ChangeError extends Error {
   override readonly name: string = 'ChangeError';
 }
@@ -126,6 +137,7 @@ export interface ProposeInput {
  */
 export class ChangeService {
   readonly #validators: DocumentValidator[] = [];
+  readonly #effects: DocumentEffect[] = [];
 
   readonly journal: Journal;
   readonly root: string;
@@ -137,6 +149,10 @@ export class ChangeService {
 
   addValidator(v: DocumentValidator): void {
     this.#validators.push(v);
+  }
+
+  addEffect(e: DocumentEffect): void {
+    this.#effects.push(e);
   }
 
   get(changeId: string): ChangeState | undefined {
@@ -167,6 +183,7 @@ export class ChangeService {
     return this.journal.exclusive(async () => {
       const current = await this.read(input.target);
       const next = this.#tryApply(current, input.patch, input.target);
+      if (mode === 'auto') await this.#check(input.target, current, next.doc);
       const changeId = newId('chg');
       await this.journal.append({
         type: 'change.proposed',
@@ -177,7 +194,7 @@ export class ChangeService {
         reason: input.reason,
         evidence: [...(input.evidence ?? [])],
       });
-      if (mode === 'auto') await this.#commit(changeId, 'change.applied', input.author, input.target, next);
+      if (mode === 'auto') await this.#commit(changeId, 'change.applied', input.author, input.target, current, next);
       return this.get(changeId)!;
     });
   }
@@ -185,8 +202,10 @@ export class ChangeService {
   accept(changeId: string, by: Author): Promise<ChangeState> {
     return this.journal.exclusive(async () => {
       const c = this.#expect(changeId, 'proposed');
-      const next = this.#tryApply(await this.read(c.target), c.patch, c.target);
-      await this.#commit(changeId, 'change.applied', by, c.target, next);
+      const current = await this.read(c.target);
+      const next = this.#tryApply(current, c.patch, c.target);
+      await this.#check(c.target, current, next.doc);
+      await this.#commit(changeId, 'change.applied', by, c.target, current, next);
       return this.get(changeId)!;
     });
   }
@@ -235,8 +254,10 @@ export class ChangeService {
   redo(changeId: string, by: Author): Promise<ChangeState> {
     return this.journal.exclusive(async () => {
       const c = this.#expect(changeId, 'reverted');
-      const next = this.#tryApply(await this.read(c.target), c.patch, c.target);
-      await this.#commit(changeId, 'change.restored', by, c.target, next);
+      const current = await this.read(c.target);
+      const next = this.#tryApply(current, c.patch, c.target);
+      await this.#check(c.target, current, next.doc);
+      await this.#commit(changeId, 'change.restored', by, c.target, current, next);
       return this.get(changeId)!;
     });
   }
@@ -276,9 +297,20 @@ export class ChangeService {
 
   async #revertOne(changeId: string, by: Author, reason?: string): Promise<void> {
     const c = this.get(changeId)!;
-    const next = this.#tryApply(await this.read(c.target), c.inverse!, c.target);
+    const current = await this.read(c.target);
+    const next = this.#tryApply(current, c.inverse!, c.target);
+    await this.#check(c.target, current, next.doc);
     await this.journal.append({ type: 'change.reverted', changeId, author: by, ...(reason ? { reason } : {}) });
     await this.#write(c.target, next.doc);
+    await this.#apply(c.target, current, next.doc);
+  }
+
+  async #check(target: string, before: JsonValue, after: JsonValue): Promise<void> {
+    for (const e of this.#effects) if (e.matches(target)) await e.check(target, before, after);
+  }
+
+  async #apply(target: string, before: JsonValue, after: JsonValue): Promise<void> {
+    for (const e of this.#effects) if (e.matches(target)) await e.apply(target, before, after);
   }
 
   #expect(changeId: string, status: ChangeStatus): ChangeState {
@@ -310,10 +342,12 @@ export class ChangeService {
     type: 'change.applied' | 'change.restored',
     by: Author,
     target: string,
+    before: JsonValue,
     next: { doc: JsonValue; inverse: PatchOp[] },
   ): Promise<void> {
     await this.journal.append({ type, changeId, author: by, inverse: next.inverse });
     await this.#write(target, next.doc);
+    await this.#apply(target, before, next.doc);
   }
 
   async #write(target: string, doc: JsonValue): Promise<void> {

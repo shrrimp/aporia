@@ -8,6 +8,7 @@ import { migrate, type Migration } from './migrations.ts';
 import { Journal } from './journal.ts';
 import { Observations } from './observations.ts';
 import { Progress } from './progress.ts';
+import { Checkpoints } from './checkpoints.ts';
 import { ChangeService } from '../changes/change-service.ts';
 import { systemClock, type Clock } from '../clock.ts';
 import { isoDate } from './schemas.ts';
@@ -43,6 +44,7 @@ export interface OpenProfile {
   readonly journal: Journal;
   readonly observations: Observations;
   readonly progress: Progress;
+  readonly checkpoints: Checkpoints;
   readonly changes: ChangeService;
   close(): Promise<void>;
 }
@@ -125,6 +127,7 @@ export class ProfileStore {
         journal,
         observations: new Observations(journal),
         progress: new Progress(journal),
+        checkpoints: new Checkpoints(journal),
         changes,
         close: () => lock.release(),
       };

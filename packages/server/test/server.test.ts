@@ -171,6 +171,9 @@ describe('asking the agent', () => {
     expect(text).toBe('You asked: why right?');
     expect(log.prompts[0]).toMatch(/Lesson: l1 \(at side\/0\)[\s\S]*exp\(ω dt\)/);
     expect(buildAskPrompt({ question: 'q' })).not.toMatch(/<context>/);
+    // Beside a lesson, the tutor is reminded to hand back to it; a planning session is not.
+    expect(buildAskPrompt({ question: 'q', lessonId: 'l1', thread: 'chat' })).toMatch(/send the learner back to it with a #lesson: link/);
+    expect(buildAskPrompt({ question: 'q', lessonId: 'l1', thread: 'session' })).not.toMatch(/send the learner back/);
   });
 
   it('lets the agent draft lessons through the teaching tools; review mode needs acceptance; undo/redo work', async () => {
@@ -376,7 +379,9 @@ describe('static UI serving', () => {
       expect(index.headers.get('content-security-policy')).toMatch(/default-src 'self'/);
       expect((await fetch(`${s.url}/assets/app.js`)).headers.get('content-type')).toBe('text/javascript');
       expect((await fetch(`${s.url}/data.bin`)).headers.get('content-type')).toBe('application/octet-stream');
-      expect(await (await fetch(`${s.url}/some/route`)).text()).toMatch(/<title>x/);
+      const fallback = await fetch(`${s.url}/some/route`);
+      expect(await fallback.text()).toMatch(/<title>x/);
+      expect(fallback.headers.get('content-security-policy')).toMatch(/default-src 'self'.*worker-src 'self'$/);
       const { request } = await import('node:http');
       const u = new URL(s.url);
       const raw = (p: string) =>

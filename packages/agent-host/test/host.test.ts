@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AgentHost,
   AgentHostError,
+  agentProblem,
   CLAUDE_READ_ONLY_TOOLS,
   CLAUDE_WRITE_TOOLS,
   claudeAgent,
@@ -132,6 +133,31 @@ describe('AgentHost (in-process fake agent)', () => {
     await host.close();
   });
 
+  it('reports the login the agent pushes, without personal details', async () => {
+    const { host, sessionId } = await setup();
+    expect(host.authStatus).toBeUndefined();
+    const seen: unknown[] = [];
+    const off = host.onAuthStatus((a) => seen.push(a));
+    await run(host, sessionId, 'auth none');
+    expect(host.authStatus).toEqual({ kind: 'apiKey', label: 'apiKey' });
+    expect(seen).toEqual([{ kind: 'none', label: 'Not logged in' }, { kind: 'apiKey', label: 'apiKey' }]);
+    off();
+    await run(host, sessionId, 'auth claude-subscription');
+    expect(seen).toHaveLength(2);
+  });
+
+  it('names the problem behind a failure', async () => {
+    const { host, sessionId } = await setup();
+    const err = await host.prompt(sessionId, 'login', () => undefined).catch((e: unknown) => e);
+    expect(agentProblem(err)).toBe('login');
+    expect(agentProblem({ code: -32000 })).toBe('login');
+    expect(agentProblem(Object.assign(new Error('x'), { code: 'EACCES' }))).toBe('missing');
+    expect(agentProblem(new AgentHostError('x', 'stopped'))).toBe('stopped');
+    expect(agentProblem(new AgentHostError('x'))).toBe('other');
+    expect(agentProblem(new Error('x'))).toBe('other');
+    expect(agentProblem(null)).toBe('other');
+  });
+
   it('passes agent-specific session options', async () => {
     const log: FakeAgentLog = { sessions: [], cancelled: [] };
     const host = await AgentHost.inProcess(fakeAgent(log), claudeAgent);
@@ -148,6 +174,22 @@ describe('AgentHost (in-process fake agent)', () => {
     expect((log.sessions[1]!._meta as { claudeCode: { options: Record<string, unknown> } }).claudeCode.options).not.toHaveProperty('systemPrompt');
     expect(options['tools']).not.toContain('Edit');
   });
+
+  it('resumes a session from an earlier run, with the same options and policy', async () => {
+    const log: FakeAgentLog = { sessions: [], cancelled: [] };
+    const host = await AgentHost.inProcess(fakeAgent(log, { resume: true }), claudeAgent);
+    expect(host.canResume).toBe(true);
+    await host.resumeSession('s7', { ...opts(), systemPrompt: 'Teach.' }, scope);
+    expect(log.resumed![0]).toMatchObject({ sessionId: 's7', cwd: workspace, _meta: { claudeCode: { options: { systemPrompt: 'Teach.' } } } });
+    // The policy applies to the resumed session: a write is still refused.
+    expect(textOf(await run(host, 's7', `write ${path.join(workspace, 'Joint.cpp')}`))).toMatch(/^write:error/);
+    await expect(host.resumeSession('gone', opts(), scope)).rejects.toThrow();
+    await expect(run(host, 'gone', 'hello')).rejects.toThrow(/unknown session/);
+
+    const old = await AgentHost.inProcess(fakeAgent());
+    expect(old.canResume).toBe(false);
+    await expect(old.resumeSession('s1', opts(), scope)).rejects.toThrow(/cannot resume/);
+  });
 });
 
 describe('AgentHost (subprocess)', () => {
@@ -162,9 +204,24 @@ describe('AgentHost (subprocess)', () => {
     await host.close();
   });
 
-  it('fails pending requests when the agent dies', async () => {
+  it('says the agent stopped when it dies before answering', async () => {
     const spec = genericAgent('dead', 'Dead', { command: process.execPath, args: ['-e', 'process.exit(0)'] });
-    await expect(AgentHost.spawn(spec)).rejects.toBeDefined();
+    await expect(AgentHost.spawn(spec)).rejects.toMatchObject({ name: 'AgentHostError', problem: 'stopped', message: expect.stringMatching(/^Dead stopped \(exit code 0\)/) });
+  });
+
+  it('says what went wrong when a running agent refuses to start', async () => {
+    const script = `process.stdin.once('data', (d) => { const id = JSON.parse(String(d).split('\\n')[0]).id; process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'boom' } }) + '\\n'); }); setInterval(() => {}, 1000);`;
+    const spec = genericAgent('grumpy', 'Grumpy', { command: process.execPath, args: ['-e', script] });
+    await expect(AgentHost.spawn(spec)).rejects.toMatchObject({ problem: 'other', message: expect.stringMatching(/^Grumpy did not start: .*boom/) });
+  });
+
+  it('says the agent is missing instead of crashing when it cannot be started', async () => {
+    const spec = genericAgent('none', 'Nothing', { command: 'no-such-agent-binary-xyz', args: [] });
+    await expect(AgentHost.spawn(spec)).rejects.toMatchObject({ problem: 'missing', message: expect.stringMatching(/Nothing could not be started \(ENOENT\)/) });
+    const broken = { ...spec, launch: () => { throw Object.assign(new Error('Cannot find module x'), { code: 'MODULE_NOT_FOUND' }); } };
+    await expect(AgentHost.spawn(broken)).rejects.toMatchObject({ problem: 'missing', message: expect.stringMatching(/could not be found/) });
+    const odd = { ...spec, launch: () => { throw new Error('bad config'); } };
+    await expect(AgentHost.spawn(odd)).rejects.toMatchObject({ problem: 'other' });
   });
 
   it('claude spec launches the official adapter with the current Node', () => {

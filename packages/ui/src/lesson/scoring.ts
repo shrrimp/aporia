@@ -1,13 +1,17 @@
 import type { DrillItem } from '@app/catalog';
 
 export type Response =
-  | { kind: 'mcq'; choice: number }
+  | { kind: 'mcq'; choice: number; reason?: number }
   | { kind: 'numeric'; value: number }
   | { kind: 'order'; lines: readonly string[] };
 
 /** Deterministic scoring, 0–1. Short answers are not scored here: the tutor judges them. */
 export function score(item: DrillItem, r: Response): number {
-  if (item.kind === 'mcq' && r.kind === 'mcq') return r.choice === item.answer ? 1 : 0;
+  if (item.kind === 'mcq' && r.kind === 'mcq') {
+    if (r.choice !== item.answer) return 0;
+    // Two-tier (R8): the right answer for a wrong reason is a guess or elimination, not knowing.
+    return !item.reason || r.reason === item.reason.answer ? 1 : 0.25;
+  }
   if (item.kind === 'numeric' && r.kind === 'numeric') return Math.abs(r.value - item.answer) <= item.tolerance ? 1 : 0;
   if (item.kind === 'order' && r.kind === 'order') {
     if (r.lines.length !== item.lines.length) return 0;

@@ -20,8 +20,20 @@ const TEACHING: Readonly<Record<string, Activity>> = {
   record_insight: { label: 'Noting how you learn', kind: 'note' },
   draft_lesson: { label: 'Writing a lesson', kind: 'lesson' },
   revise_lesson: { label: 'Revising the lesson', kind: 'lesson' },
+  add_to_lesson: { label: 'Adding practice to the lesson', kind: 'lesson' },
   get_lesson: { label: 'Rereading the lesson', kind: 'lesson' },
   list_lessons: { label: 'Looking over your lessons', kind: 'lesson' },
+  get_skill_map: { label: 'Reading your skill map', kind: 'context' },
+  update_skill_map: { label: 'Updating your skill map', kind: 'note' },
+  set_curriculum: { label: 'Planning the lessons', kind: 'lesson' },
+  update_roadmap: { label: 'Proposing roadmap changes', kind: 'lesson' },
+  save_assessment: { label: 'Writing down what it found', kind: 'note' },
+  list_sources: { label: 'Looking at your imported files', kind: 'context' },
+  read_source: { label: 'Reading an imported file', kind: 'context' },
+  search_sources: { label: 'Searching your imported files', kind: 'context' },
+  write_file: { label: 'Writing a file in your workspace', kind: 'code' },
+  run_tests: { label: 'Running your tests', kind: 'code' },
+  run_command: { label: 'Taking a measurement', kind: 'code' },
 };
 
 const base = (p: string) => p.split(/[\\/]/).filter(Boolean).at(-1) ?? p;

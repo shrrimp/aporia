@@ -13,6 +13,11 @@ describe('scoring', () => {
   it('scores each kind deterministically', () => {
     expect(score({ ...base, kind: 'mcq', options: ['a', 'b'], answer: 1 } as DrillItem, { kind: 'mcq', choice: 1 })).toBe(1);
     expect(score({ ...base, kind: 'mcq', options: ['a', 'b'], answer: 1 } as DrillItem, { kind: 'mcq', choice: 0 })).toBe(0);
+    // Two-tier: the answer counts fully only with the right reason (R8).
+    const twoTier = { ...base, kind: 'mcq', options: ['a', 'b'], answer: 1, reason: { prompt: 'Why?', options: ['r0', 'r1'], answer: 0 } } as DrillItem;
+    expect(score(twoTier, { kind: 'mcq', choice: 1, reason: 0 })).toBe(1);
+    expect(score(twoTier, { kind: 'mcq', choice: 1, reason: 1 })).toBe(0.25);
+    expect(score(twoTier, { kind: 'mcq', choice: 0, reason: 0 })).toBe(0);
     const num = { ...base, kind: 'numeric', answer: 2, tolerance: 0.01 } as DrillItem;
     expect(score(num, { kind: 'numeric', value: 2.005 })).toBe(1);
     expect(score(num, { kind: 'numeric', value: 2.1 })).toBe(0);

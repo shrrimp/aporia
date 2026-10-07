@@ -14,6 +14,8 @@
     "@app/catalog": "*",
     "@app/core": "*",
     "@app/teacher-mcp": "*",
+    "character-entities": "^2.0.2",
+    "unpdf": "^1.8.1",
     "ws": "^8.22.0",
     "zod": "^4.6.5"
   },

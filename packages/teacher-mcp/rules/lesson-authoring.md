@@ -12,6 +12,9 @@ never write HTML, CSS or JavaScript; the app renders components its own way.
    something to *do* (predict, think-first). Never more than ~700 words without an activity.
    Go from a concrete case to the general idea.
 4. **Practice** (`practice`): drills, contrasts, find-the-bug, matched to the learner's level.
+   To check understanding, prefer `short` (explain, predict in words) and `numeric` over `mcq`.
+   When you use `mcq`, make the wrong options real misconceptions and add a `reason` tier: the
+   right answer for the wrong reason is elimination, and shows which misconception to address.
 5. **Build** (`build`): ordered tasks with checkpoints. Use the scaffold level the context gives.
    Stubs contain signatures and contracts only. The validator rejects implementations.
 6. **Exit** (`exit`): at least one transfer question (a new situation) and/or an explain-back.

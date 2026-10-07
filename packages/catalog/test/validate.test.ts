@@ -118,6 +118,7 @@ describe('validateLesson', () => {
           { id: 'd1', kind: 'mcq', prompt: 'p', options: ['a', 'b'], answer: 2, kcs: ['joint.nq-nv'], difficulty: 3, why: 'w' },
           { id: 'd2', kind: 'order', prompt: 'p', lines: ['a', 'a'], kcs: ['joint.nq-nv'], difficulty: 3, why: 'w' },
           { id: 'd3', kind: 'numeric', prompt: 'p', answer: 1, kcs: ['joint.nq-nv'], difficulty: 3, why: 'w' },
+          { id: 'd5', kind: 'mcq', prompt: 'p', options: ['a', 'b'], answer: 0, reason: { options: ['r1', 'r2'], answer: 2 }, kcs: ['joint.nq-nv'], difficulty: 3, why: 'w' },
           { id: 'd4', kind: 'short', prompt: 'p', answer: 'x', kcs: ['other.kc'], difficulty: 3, why: 'w' },
         ],
       },
@@ -129,6 +130,7 @@ describe('validateLesson', () => {
     expect(all).toMatch(/analogue worked examples need subgoal/);
     expect(all).toMatch(/duplicate id "step-2"/);
     expect(all).toMatch(/answer index is out of range/);
+    expect(all).toMatch(/\.reason: reason answer index is out of range/);
     expect(all).toMatch(/order lines must be distinct/);
     expect(warnings.join('\n')).toMatch(/KC "other\.kc" is not listed/);
   });

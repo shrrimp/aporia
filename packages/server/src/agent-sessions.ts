@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
-import type { AgentHost, AgentSpec, HostEvent } from '@app/agent-host';
-import { resolveInside, type OpenProfile } from '@app/core';
+import { mkdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { z } from 'zod';
+import { agentProblem, type AgentHost, type AgentSpec, type AuthStatus, type HostEvent } from '@app/agent-host';
+import { Mutex, resolveInside, writeJsonAtomic, type OpenProfile } from '@app/core';
 import { systemPrompt, type Registration, type TeacherHttpServer } from '@app/teacher-mcp';
 import { brand } from '@app/brand';
 import type { LearnerForm } from '@app/catalog';
-import type { ProfileDTO, ProjectDTO } from './protocol.ts';
+import type { AgentStatusDTO, ProfileDTO, ProjectDTO } from './protocol.ts';
 
 /** Everything a turn can produce for the UI: the agent's own events, plus forms shown via the teaching tools. */
 export type TurnEvent = HostEvent | { readonly kind: 'form'; readonly form: LearnerForm };
@@ -19,6 +21,17 @@ interface Live {
   sink: ((e: TurnEvent) => void) | undefined;
 }
 
+/** A conversation's agent session, remembered so a restart resumes it rather than starting over. */
+const savedSession = z.strictObject({
+  agent: z.string(),
+  sessionId: z.string(),
+  /** Who the session's changes are attributed to in the journal. */
+  actor: z.string(),
+  cwd: z.string(),
+});
+const savedSessions = z.record(z.string(), savedSession);
+type SavedSession = z.output<typeof savedSession>;
+
 /**
  * Owns the agent process and its sessions for the open profile. Session lifetime follows the
  * learner's setting (D18): one per question, per lesson, or one permanent session per project.
@@ -31,13 +44,88 @@ export class AgentSessions {
   readonly #settings: () => ProfileDTO['settings'];
   #host: Promise<AgentHost> | undefined;
   readonly #live = new Map<string, Live>();
+  readonly #saved = new Mutex();
+  readonly #onStatus: (s: AgentStatusDTO) => void;
+  #status: AgentStatusDTO;
 
-  constructor(spec: AgentSpec, factory: HostFactory, teacher: TeacherHttpServer, profile: OpenProfile, settings: () => ProfileDTO['settings']) {
+  constructor(
+    spec: AgentSpec,
+    factory: HostFactory,
+    teacher: TeacherHttpServer,
+    profile: OpenProfile,
+    settings: () => ProfileDTO['settings'],
+    onStatus: (s: AgentStatusDTO) => void,
+  ) {
     this.#spec = spec;
     this.#factory = factory;
     this.#teacher = teacher;
     this.#profile = profile;
     this.#settings = settings;
+    this.#onStatus = onStatus;
+    this.#status = { agent: spec.displayName, state: 'unknown' };
+  }
+
+  get status(): AgentStatusDTO {
+    return this.#status;
+  }
+
+  #setStatus(next: Omit<AgentStatusDTO, 'agent'>): void {
+    const s: AgentStatusDTO = { agent: this.#spec.displayName, ...next };
+    if (JSON.stringify(s) === JSON.stringify(this.#status)) return;
+    this.#status = s;
+    this.#onStatus(s);
+  }
+
+  /** The agent's login, as it reported it: "none" means logged out. */
+  #fromAuth(auth: AuthStatus | undefined): Omit<AgentStatusDTO, 'agent'> {
+    if (auth?.kind === 'none') return { state: 'login', message: loginHelp(this.#spec) };
+    return { state: 'ready', ...(auth ? { account: auth.label } : {}) };
+  }
+
+  #failed(err: unknown): void {
+    const problem = agentProblem(err);
+    const message = (err as Error)?.message ?? String(err);
+    if (problem === 'login') this.#setStatus({ state: 'login', message: loginHelp(this.#spec) });
+    else if (problem === 'missing') this.#setStatus({ state: 'missing', message });
+    else if (problem === 'stopped') {
+      // Start a fresh agent next time; its sessions died with it.
+      this.#host = undefined;
+      for (const l of this.#live.values()) l.reg.revoke();
+      this.#live.clear();
+      this.#setStatus({ state: 'stopped', message });
+    }
+    else this.#setStatus({ state: 'error', message });
+  }
+
+  /**
+   * Start the agent (if needed) and report whether it can teach: installed, running, and logged
+   * in. An agent that reports its login (the Claude adapter does, shortly after starting) is
+   * given a few seconds to say so; otherwise the login is known at the first question.
+   */
+  async check(waitForLoginMs = 6000): Promise<AgentStatusDTO> {
+    if (this.#status.state === 'stopped' || this.#status.state === 'error' || this.#status.state === 'missing') this.#host = undefined;
+    this.#setStatus({ state: 'starting' });
+    let host: AgentHost;
+    try {
+      host = await this.#hostOnce();
+    } catch (err) {
+      this.#failed(err);
+      return this.#status;
+    }
+    const reports = (host.agentInfo.agentCapabilities?._meta as { authStatus?: unknown } | undefined)?.authStatus !== undefined;
+    if (reports && host.authStatus === undefined) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(done, waitForLoginMs);
+        const off = host.onAuthStatus(done);
+        function done() {
+          clearTimeout(timer);
+          off();
+          resolve();
+        }
+      });
+    }
+    this.#setStatus(this.#fromAuth(host.authStatus));
+    return this.#status;
   }
 
   #key(project: ProjectDTO, lessonId: string | undefined, thread: 'chat' | 'session'): string | undefined {
@@ -53,32 +141,81 @@ export class AgentSessions {
   }
 
   async #hostOnce(): Promise<AgentHost> {
-    this.#host ??= this.#factory(this.#spec).catch((err: unknown) => {
-      this.#host = undefined;
-      throw err;
-    });
+    this.#host ??= this.#factory(this.#spec).then(
+      (host) => {
+        // Logging in or out in a terminal while the app runs updates the status.
+        host.onAuthStatus((a) => this.#setStatus(this.#fromAuth(a)));
+        return host;
+      },
+      (err: unknown) => {
+        this.#host = undefined;
+        throw err;
+      },
+    );
     return this.#host;
   }
 
-  async #open(project: ProjectDTO): Promise<Live> {
+  get #sessionsFile(): string {
+    return path.join(this.#profile.dir, 'agent-sessions.json');
+  }
+
+  async #readSaved(): Promise<Record<string, SavedSession>> {
+    try {
+      const parsed = savedSessions.safeParse(JSON.parse(await readFile(this.#sessionsFile, 'utf8')));
+      return parsed.success ? parsed.data : {};
+    } catch {
+      return {};
+    }
+  }
+
+  #remember(key: string, s: SavedSession | undefined): Promise<void> {
+    return this.#saved.run(async () => {
+      const all = await this.#readSaved();
+      if (s) all[key] = s;
+      else delete all[key];
+      await writeJsonAtomic(this.#sessionsFile, all);
+    });
+  }
+
+  /**
+   * Open the agent session for a conversation: the one from an earlier run when the agent can
+   * resume it (it keeps its memory, including a turn cut off by a crash), else a new one.
+   * `resumed` says which: a new session needs a recap of the conversation.
+   */
+  async #open(project: ProjectDTO, key: string | undefined): Promise<Live & { resumed: boolean }> {
     const host = await this.#hostOnce();
-    const session = randomUUID();
+    const earlier = key ? (await this.#readSaved())[key] : undefined;
+    // Code projects run in their workspace; others in their own project folder.
+    const cwd = project.workspace ?? resolveInside(this.#profile.dir, 'projects', project.id);
+    await mkdir(cwd, { recursive: true });
+    const canResume = earlier !== undefined && earlier.agent === this.#spec.id && earlier.cwd === cwd && host.canResume;
+    const actor = canResume ? earlier.actor : randomUUID();
     const live: { sink: Live['sink'] } = { sink: undefined };
     const reg = this.#teacher.register({
       profile: this.#profile,
       projectId: project.id,
-      agent: { kind: 'agent', agent: this.#spec.id, session },
+      agent: { kind: 'agent', agent: this.#spec.id, session: actor },
       changeMode: () => this.#settings().changeMode,
       present: (form) => live.sink?.({ kind: 'form', form }),
     });
-    // Code projects run in their workspace; others in their own project folder.
-    const cwd = project.workspace ?? resolveInside(this.#profile.dir, 'projects', project.id);
-    await mkdir(cwd, { recursive: true });
-    const sessionId = await host.newSession(
-      { cwd, additionalDirectories: [], mcpServers: [reg.acpServer], systemPrompt: systemPrompt() },
-      { readRoots: [cwd], trustedMcpServers: [brand.id] },
-    );
-    return Object.assign(live, { sessionId, reg });
+    const opts = { cwd, additionalDirectories: [], mcpServers: [reg.acpServer], systemPrompt: systemPrompt() };
+    const scope = { readRoots: [cwd], trustedMcpServers: [brand.id] };
+    try {
+      if (canResume) {
+        try {
+          await host.resumeSession(earlier.sessionId, opts, scope);
+          return Object.assign(live, { sessionId: earlier.sessionId, reg, resumed: true });
+        } catch {
+          // The agent no longer has it (deleted, another machine): start over with a recap.
+        }
+      }
+      const sessionId = await host.newSession(opts, scope);
+      if (key) await this.#remember(key, { agent: this.#spec.id, sessionId, actor, cwd });
+      return Object.assign(live, { sessionId, reg, resumed: false });
+    } catch (err) {
+      reg.revoke();
+      throw err;
+    }
   }
 
   /** Run one learner question through the agent. */
@@ -93,12 +230,32 @@ export class AgentSessions {
     recap?: () => string | undefined,
   ): Promise<string> {
     const key = this.#key(project, lessonId, thread);
-    let live = key ? this.#live.get(key) : undefined;
+    const live = key ? this.#live.get(key) : undefined;
+    try {
+      return await this.#ask(project, key, live, prompt, onEvent, onStart, recap);
+    } catch (err) {
+      this.#failed(err);
+      if (agentProblem(err) === 'login') throw new Error(loginHelp(this.#spec));
+      if (agentProblem(err) === 'missing') throw new Error(`${this.#spec.displayName} could not be started, so your tutor cannot answer. ${(err as Error).message}`);
+      throw err;
+    }
+  }
+
+  async #ask(
+    project: ProjectDTO,
+    key: string | undefined,
+    live: Live | undefined,
+    prompt: string,
+    onEvent: (e: TurnEvent) => void,
+    onStart: (cancel: () => Promise<void>) => void,
+    recap?: () => string | undefined,
+  ): Promise<string> {
     if (!live) {
-      live = await this.#open(project);
+      const opened = await this.#open(project, key);
+      live = opened;
       if (key) {
-        this.#live.set(key, live);
-        const earlier = recap?.();
+        this.#live.set(key, opened);
+        const earlier = opened.resumed ? undefined : recap?.();
         if (earlier) prompt = `${earlier}\n\n${prompt}`;
       }
     }
@@ -107,7 +264,9 @@ export class AgentSessions {
     onStart(() => host.cancel(sessionId));
     live.sink = onEvent;
     try {
-      return await host.prompt(sessionId, prompt, onEvent);
+      const stop = await host.prompt(sessionId, prompt, onEvent);
+      if (this.#status.state !== 'ready') this.#setStatus(this.#fromAuth(host.authStatus));
+      return stop;
     } finally {
       live.sink = undefined;
       if (!key) live.reg.revoke();
@@ -123,15 +282,26 @@ export class AgentSessions {
   }
 }
 
+/** What to do when the agent is not logged in. The app never handles the login itself (architecture §1). */
+export function loginHelp(spec: Pick<AgentSpec, 'id' | 'displayName'>): string {
+  const how = spec.id === 'claude' ? 'Open a terminal, run `claude`, type `/login` and follow the steps' : `Log in to ${spec.displayName} the way its documentation describes`;
+  return `${spec.displayName} is not logged in, so your tutor cannot answer. ${how}; then come back and try again.`;
+}
+
 /** The prompt sent for one question: the question plus where it was asked. */
 export function buildAskPrompt(q: {
   question: string;
   lessonId?: string | undefined;
   anchor?: string | undefined;
   selection?: string | undefined;
+  /** "chat": asked beside a lesson, so the answer hands back to it. */
+  thread?: 'chat' | 'session' | undefined;
 }): string {
   const ctx: string[] = [];
   if (q.lessonId) ctx.push(`Lesson: ${q.lessonId}${q.anchor ? ` (at ${q.anchor})` : ''}`);
+  if (q.lessonId && q.thread === 'chat') {
+    ctx.push('Asked from the lesson: help, then send the learner back to it with a #lesson: link. Practice goes in the lesson (add_to_lesson), not in the chat.');
+  }
   if (q.selection) ctx.push(`The learner selected this passage:\n"""\n${q.selection}\n"""`);
   return [
     'If you have not yet called get_teaching_context in this session, call it first.',

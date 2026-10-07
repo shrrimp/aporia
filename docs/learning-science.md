@@ -77,6 +77,30 @@ varied, and for more complex material. *Brunmair & Richter 2019, Psychological B
 → Interleave **confusable** KCs (motion vs force transform rules, left vs right quaternion
 multiplication). Don't interleave unrelated facts for the sake of it.
 
+**R8. Question format: recall for learning when it succeeds, a reason tier for diagnosis. Grade B ✔**
+*For learning*, short-answer quizzes with feedback beat multiple-choice quizzes and restudy on a
+test 3 days later; without feedback the advantage reversed, because failed recall left nothing.
+*Kang, McDermott & Roediger 2007, European Journal of Cognitive Psychology*
+([PDF](https://www.gwern.net/docs/spaced-repetition/2007-kang.pdf)). Across four experiments
+(372 students) short-answer and hybrid (recall, then choose) showed little or no advantage over
+multiple choice, except when initial recall succeeded more often: retrieval *success* matters,
+not difficulty for its own sake. *Smith & Karpicke 2014, Memory*
+([PDF](https://learninglab.psych.purdue.edu/downloads/2014/2014_Smith_Karpicke_Memory.pdf)).
+Multiple choice with *plausible, competitive* alternatives triggers productive retrieval,
+including of why the wrong options are wrong. *Little, Bjork, Bjork & Angello 2012,
+Psychological Science* ([PDF](https://bjorklab.psych.ucla.edu/wp-content/uploads/sites/13/2017/01/LittleBjorkMC2014.pdf)).
+*For diagnosis*, guessing and test-wiseness (answering by elimination) add construct-irrelevant
+variance to multiple-choice scores; multiple-choice and constructed-response scores correlate
+only moderately across exams (Rodriguez 2003, via
+[this review](https://pmc.ncbi.nlm.nih.gov/articles/PMC5346173)). Two-tier items (the answer,
+then the reason, with wrong reasons drawn from known misconceptions) diagnose misconceptions
+better than plain multiple choice. *Treagust 1988; Tsui & Treagust 2010*
+([review](https://www.lifescied.org/doi/10.1187/cbe.10-03-0048)).
+→ To check understanding, prefer production: explain, predict in words, the first line you would
+write. Use multiple choice where recall would mostly fail (pretests, beginners) and only with
+misconception-based distractors, and give it a reason tier: credit needs the answer *and* the
+reason. A choice alone stays weak evidence (recognition weight 0.5).
+
 **R7. Learning vs performance. Grade A ○**
 Performance during practice is a poor indicator of durable learning. Conditions that slow
 practice (spacing, interleaving, generation) often improve retention and transfer: "desirable

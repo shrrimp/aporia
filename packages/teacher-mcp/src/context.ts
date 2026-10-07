@@ -1,7 +1,20 @@
 import { readFileSync } from 'node:fs';
 import type { LearnerForm } from '@app/catalog';
+import { lessonIds, projectReviews, type ProjectReviews } from './lessons.ts';
+import { projectTarget } from './paths.ts';
+import { readSkillMap } from './skills.ts';
+import { readSources, type SourcesDoc } from './sources.ts';
+import { projectAccess } from './files.ts';
+import { describeRoadmap, readRoadmap } from './roadmap.ts';
+import { describePermissions } from '@app/catalog';
 import {
+  assessmentTarget,
   band,
+  checkpointRuns,
+  curriculumDoc,
+  curriculumTarget,
+  type Curriculum,
+  type SkillMap,
   deriveLearnerState,
   difficultyAdjustment,
   ratingConfidence,
@@ -34,9 +47,7 @@ export function systemPrompt(): string {
   return `${RULES.constitution}\n\n${RULES.lessonAuthoring}\n\nCall get_teaching_context before teaching.`;
 }
 
-export const lessonsDir = (projectId: string) => `projects/${projectId}/lessons`;
-export const lessonTarget = (projectId: string, lessonId: string) => `${lessonsDir(projectId)}/${lessonId}.json`;
-export const projectTarget = (projectId: string) => `projects/${projectId}/project.json`;
+export { lessonsDir, lessonTarget, projectTarget } from './paths.ts';
 
 /** Recommended scaffold level for a KC (pedagogy-model §3, §5). */
 export function scaffoldFor(theta: number): number {
@@ -72,14 +83,69 @@ export function learnerSummary(state: LearnerState): string {
   return lines.join('\n');
 }
 
+/** What the learner's own tests said, per task: facts measured by the app (most recent first). */
+export function checkpointSummary(events: Parameters<typeof checkpointRuns>[0], projectId: string, max = 10): string {
+  const tasks = [...checkpointRuns(events, projectId).entries()].sort(([, a], [, b]) => b.runs.at(-1)!.at.localeCompare(a.runs.at(-1)!.at)).slice(0, max);
+  if (tasks.length === 0) return 'No checkpoint runs yet.';
+  return tasks
+    .map(([key, t]) => {
+      const last = t.runs.at(-1)!;
+      const result = last.counts ? `${last.counts.passed}/${last.counts.total} passing` : last.timedOut ? 'timed out' : 'no readable summary';
+      const failing = last.failures.length ? `; failing: ${last.failures.slice(0, 5).join(', ')}${last.failures.length > 5 ? ', …' : ''}` : '';
+      return `- ${key}: ${t.runs.length} run(s), last ${result} (expects ${last.expect.passed}/${last.expect.of})${t.reached ? ', reached' : ''}${failing}`;
+    })
+    .join('\n');
+}
+
+/** Items due for review, for the next warm-up: the tutor reuses them instead of inventing new ones. */
+export function reviewSummary(r: ProjectReviews, max = 8): string {
+  if (r.dueCount === 0) return r.nextDue ? `Nothing due. Next item due ${r.nextDue.slice(0, 10)}.` : 'Nothing answered yet, so nothing to review.';
+  const lines = r.due.slice(0, max).map((d) => `- ${d.itemId} (${d.item.kind}, KCs ${d.item.kcs.join(', ')}, recall ≈ ${Math.round(d.retrievability * 100)}%): ${d.item.prompt.replace(/\s+/g, ' ').slice(0, 160)}`);
+  return [`${r.dueCount} item(s) due. Put 2–4 of the most at risk in the next lesson's warm-up, with reviewOf set to the id below (the answer then reschedules it):`, ...lines].join('\n');
+}
+
+/** The project's plan and where each planned lesson stands, so the tutor continues it instead of starting over. */
+export function curriculumSummary(curriculum: Curriculum | undefined, lessons: readonly string[], map: SkillMap, hasAssessment: boolean): string {
+  const lines: string[] = [];
+  const suggestions = Object.values(map.skills).filter((s) => s.suggested).length;
+  lines.push(
+    `Skill map: ${Object.keys(map.skills).length} skill(s) in ${Object.keys(map.groups).length} group(s), ${suggestions} suggestion(s). Read it with get_skill_map.`,
+    hasAssessment ? 'Interview: done (assessment saved).' : 'Interview: not done yet. Run it, then save_assessment.',
+  );
+  if (!curriculum) {
+    lines.push('No curriculum yet: describe the skills with update_skill_map, then set the goals and plan with set_curriculum.');
+    return lines.join('\n');
+  }
+  lines.push(`Goals: ${curriculum.goals.join(', ')}`, 'Plan:');
+  const written = new Set(lessons);
+  let next = true;
+  curriculum.plan.forEach((p, i) => {
+    const done = p.lessonId !== undefined && written.has(p.lessonId);
+    const mark = done ? `written as ${p.lessonId}` : next ? 'NEXT' : 'later';
+    if (!done) next = false;
+    lines.push(`${i + 1}. [${mark}] ${p.title} (${p.kcs.join(', ')})${p.capability ? `: ${p.capability}` : ''}`);
+  });
+  return lines.join('\n');
+}
+
+/** The imported files, newest last, so the tutor knows what it can read. */
+export function sourcesSummary(sources: SourcesDoc['sources'], max = 30): string {
+  const list = Object.entries(sources).sort(([, a], [, b]) => a.addedAt.localeCompare(b.addedAt));
+  if (list.length === 0) return 'None.';
+  const lines = list.slice(-max).map(([id, s]) => `- ${id}: "${s.name}" (${s.kind}${s.pages ? `, ${s.pages} pages` : ''})`);
+  return [...(list.length > max ? [`(${list.length - max} older files not listed; see list_sources)`] : []), ...lines].join('\n');
+}
+
 export async function teachingContext(ctx: TeacherContext): Promise<string> {
-  const state = deriveLearnerState(ctx.profile.journal.events, ctx.profile.journal.now());
+  const now = ctx.profile.journal.now();
+  const state = deriveLearnerState(ctx.profile.journal.events, now);
   const project = await ctx.profile.changes.read(projectTarget(ctx.projectId));
-  const lessons = ctx.profile.changes
-    .list({ status: 'applied' })
-    .map((c) => c.target)
-    .filter((t, i, all) => t.startsWith(`${lessonsDir(ctx.projectId)}/`) && all.indexOf(t) === i)
-    .map((t) => t.slice(lessonsDir(ctx.projectId).length + 1, -'.json'.length));
+  const lessons = lessonIds(ctx.profile.changes, ctx.projectId);
+  const reviews = await projectReviews(ctx.profile, ctx.projectId, now);
+  const curriculum = curriculumDoc.safeParse(await ctx.profile.changes.read(curriculumTarget(ctx.projectId)));
+  const hasAssessment = (await ctx.profile.changes.read(assessmentTarget(ctx.projectId))) !== null;
+  const map = await readSkillMap(ctx.profile.changes);
+  const access = await projectAccess(ctx.profile.changes, ctx.projectId);
   return [
     `# Project`,
     project === null ? '(project details not set)' : JSON.stringify(project, null, 2),
@@ -87,8 +153,26 @@ export async function teachingContext(ctx: TeacherContext): Promise<string> {
     `# Lessons so far`,
     lessons.length ? lessons.map((l) => `- ${l}`).join('\n') : 'None yet.',
     '',
+    `# What the learner allows you to do in their workspace`,
+    access.workspace ? describePermissions(access.permissions) : 'No workspace folder: you can read imported files, nothing else.',
+    '',
+    `# Imported files (read with read_source, search with search_sources)`,
+    sourcesSummary(await readSources(ctx.profile, ctx.projectId)),
+    '',
+    `# Roadmap (the milestones of the project; change it with update_roadmap)`,
+    describeRoadmap(await readRoadmap(ctx.profile.changes, ctx.projectId)),
+    '',
+    `# Curriculum`,
+    curriculumSummary(curriculum.success ? curriculum.data : undefined, lessons, map, hasAssessment),
+    '',
     `# Learner`,
     learnerSummary(state),
+    '',
+    `# Checkpoints (the learner's tests, run by the app)`,
+    checkpointSummary(ctx.profile.journal.events, ctx.projectId),
+    '',
+    `# Due for review (scheduled by the app)`,
+    reviewSummary(reviews),
     '',
     `# Changes`,
     `The learner is in "${ctx.changeMode()}" mode: ${ctx.changeMode() === 'review' ? 'your lesson drafts and revisions wait for their approval' : 'your changes apply immediately (still undoable)'}.`,

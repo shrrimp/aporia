@@ -175,3 +175,46 @@ describe('ChangeService', () => {
     );
   });
 });
+
+describe('document effects', () => {
+  it('checks before recording and applies after writing, on every way a change moves', async () => {
+    const { svc } = await setup();
+    const calls: string[] = [];
+    let refuse = false;
+    svc.addEffect({
+      matches: (t) => t === T,
+      check: async (_t, before, after) => {
+        calls.push(`check ${JSON.stringify(before)}→${JSON.stringify(after)}`);
+        if (refuse) throw new ChangeConflictError('the file changed');
+      },
+      apply: async (_t, before, after) => void calls.push(`apply ${JSON.stringify(before)}→${JSON.stringify(after)}`),
+    });
+    svc.addEffect({ matches: () => false, check: async () => { throw new Error('never'); }, apply: async () => { throw new Error('never'); } });
+
+    const a = await svc.propose(create({ v: 1 }), 'auto');
+    const b = await svc.propose({ ...create({ v: 2 }), patch: [{ op: 'replace', path: '/v', value: 2 }] }, 'review');
+    expect(calls).toEqual(['check null→{"v":1}', 'apply null→{"v":1}']); // a proposal waiting for review has no effect yet
+    await svc.accept(b.changeId, learner);
+    await svc.revert(b.changeId, learner);
+    await svc.redo(b.changeId, learner);
+    expect(calls.slice(2)).toEqual([
+      'check {"v":1}→{"v":2}',
+      'apply {"v":1}→{"v":2}',
+      'check {"v":2}→{"v":1}',
+      'apply {"v":2}→{"v":1}',
+      'check {"v":1}→{"v":2}',
+      'apply {"v":1}→{"v":2}',
+    ]);
+
+    // A refused check records nothing.
+    refuse = true;
+    const events = svc.journal.events.length;
+    await expect(svc.revert(b.changeId, learner)).rejects.toThrow(/the file changed/);
+    await expect(svc.propose({ ...create({}), patch: [{ op: 'replace', path: '/v', value: 3 }] }, 'auto')).rejects.toThrow(/the file changed/);
+    const c = await svc.propose({ ...create({}), patch: [{ op: 'replace', path: '/v', value: 4 }] }, 'review');
+    await expect(svc.accept(c.changeId, learner)).rejects.toThrow(/the file changed/);
+    expect(svc.journal.events.length).toBe(events + 1); // only the review proposal
+    expect(svc.get(b.changeId)!.status).toBe('applied');
+    expect(svc.get(a.changeId)!.status).toBe('applied');
+  });
+});

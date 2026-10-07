@@ -57,6 +57,8 @@ export const evidenceEvent = z.strictObject({
   id: idOf('ev'),
   type: z.literal('evidence'),
   itemId: z.string().max(120),
+  /** The project the item belongs to (absent on evidence recorded before projects were noted). */
+  projectId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/).optional(),
   kcs: z
     .array(z.strictObject({ kc: kcId, weight: z.number().positive().max(1) }))
     .min(1)
@@ -126,6 +128,36 @@ export const progressEvent = z.strictObject({
   value: jsonValue.refine((v) => JSON.stringify(v).length <= 20_000, { message: 'progress value too large' }),
 });
 
+/**
+ * One run of a task's checkpoint: the learner's test command, run by the app. A fact measured
+ * by code, never reported by the agent.
+ */
+export const checkpointEvent = z.strictObject({
+  ...base,
+  id: idOf('ev'),
+  type: z.literal('checkpoint'),
+  projectId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  lessonId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  taskId: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/),
+  suite: z.string().max(300),
+  /** Absent when the output had no summary the app could read. */
+  counts: z
+    .strictObject({
+      passed: z.int().min(0),
+      failed: z.int().min(0),
+      total: z.int().min(0),
+      format: z.string().max(40),
+    })
+    .optional(),
+  expect: z.strictObject({ passed: z.int().min(0), of: z.int().min(1) }),
+  /** Reached the expected pass count. */
+  reached: z.boolean(),
+  exitCode: z.int().nullable(),
+  timedOut: z.boolean().default(false),
+  durationMs: z.int().min(0),
+  failures: z.array(z.string().max(300)).max(50).default([]),
+});
+
 const changeBase = { ...base, id: idOf('ev'), changeId: idOf('chg') };
 
 export const changeProposed = z.strictObject({
@@ -156,6 +188,7 @@ export const logEvent = z.discriminatedUnion('type', [
   insightObservation,
   revokeEvent,
   progressEvent,
+  checkpointEvent,
   changeProposed,
   changeApplied,
   changeClosed,
@@ -166,6 +199,7 @@ export type InstructionEvent = z.output<typeof instructionEvent>;
 export type InsightObservation = z.output<typeof insightObservation>;
 export type RevokeEvent = z.output<typeof revokeEvent>;
 export type ProgressEvent = z.output<typeof progressEvent>;
+export type CheckpointEvent = z.output<typeof checkpointEvent>;
 export type ChangeProposed = z.output<typeof changeProposed>;
 export type ChangeApplied = z.output<typeof changeApplied>;
 export type ChangeClosed = z.output<typeof changeClosed>;

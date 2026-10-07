@@ -9,13 +9,15 @@ Every file belongs to exactly one class. The class decides who may write it.
 | **System (read-only)** | Teaching rules, research base, lesson schema, built-in skills | – | – | only on app update |
 | **Learner model** | Mastery, misconceptions, preferences, notes | yes (edit in UI) | *proposes* via MCP | yes (merge, derive) |
 | **Curriculum & lessons** | Project graph, lessons, staged tests, imported sources | yes | yes (validated) | yes |
-| **Workspace** | The learner's own code | yes | **never** | snapshots only |
+| **Workspace** | The learner's own code | yes | only what the learner allows (tests, tools; edits to their files always reviewed), each write an undoable change, never an open task's solution | snapshots; editor saves and the tutor's accepted writes |
 | **Event log** | Append-only history | – | via tools | appends only |
 
 ## 2. Directory layout
 
 ```
 <data-root>/                            # e.g. ~/.local/share/<app>/ (XDG), %APPDATA% on Windows
+  place.json                            # where you were (profile, project, page, open file): reopened after a restart
+  logs/app.log                          # crashes, hangs and page errors, and what the app did about them (≤ 1 MB, one old file kept)
   system/                               # shipped with the app, read-only, versioned
     rules/constitution.md               # P1–P9 written for the agent
     rules/hint-ladder.md
@@ -25,20 +27,27 @@ Every file belongs to exactly one class. The class decides who may write it.
   profiles/
     <profile-id>/                       # one person; optionally encrypted (see §5)
       profile.json                      # name, created, schema version, settings
+      agent-sessions.json               # the agent's session id per conversation, so a restart resumes it (the agent keeps its own transcript)
       learner/
         model.json                      # DERIVED: mastery per KC, calibration, etc. (rebuilt from events)
         preferences.json                # stated and observed, kept separate
         misconceptions.json             # active, resolved, with evidence links
         notes.md                        # free-form; learner and agent (via proposals)
-        skills-global.json              # KCs shared across projects (e.g. "quaternions")
+        skills.json                     # the skill map: KCs, groups, links, suggestions, shared across projects
       events/
         2026-10.jsonl                   # append-only; SOURCE OF TRUTH for derived state
       projects/
         <project-id>/
           project.json                  # goal, workspace path, test command, status
           interview/transcript.md       # onboarding interview (summarised)
-          interview/assessment.json
-          curriculum.json               # KC graph + lesson plan (versioned)
+          assessment.json               # what the first interview found (the tutor's playback)
+          curriculum.json               # goal KCs + rolling lesson plan (the graph is in learner/skills.json)
+          conversations/                # the tutor threads, as shown (chat.jsonl, session.jsonl)
+          roadmap.json                  # the project's milestones (one change per milestone)
+          sources.json                  # index of imported files
+          sources/<source-id>/          # original + text.txt (what the tutor reads), copied in
+          agent-files/<key>.json        # each file the tutor wrote in the workspace: path, content, original
+          editor-drafts/<hash>.json     # unsaved text in the embedded editor, until you save or discard it (never written to your files)
           sources/<source-id>/        # imported papers/PDFs/notes + extracted text with anchors
           lessons/
             09-four-numbers/
@@ -71,7 +80,7 @@ A KC is a unit of skill or knowledge, e.g. `spatial-algebra.force-transform`,
 - `evidence[]`: links to events (drill answers, checkpoint results, explanation judgements).
 - `source`: `interview`, `observed`, or `stated`.
 
-KCs live in a **global** namespace per profile (`skills-global.json`), so "quaternions" learned
+KCs live in a **global** namespace per profile (`learner/skills.json`), so "quaternions" learned
 in the physics project count when a later graphics project needs them. That is the shared
 cross-project memory you asked for.
 

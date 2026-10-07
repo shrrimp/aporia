@@ -9,6 +9,7 @@ import { App } from '../src/App.tsx';
 import { HistoryPanel } from '../src/screens/HistoryPanel.tsx';
 import { MePanel } from '../src/screens/MePanel.tsx';
 import { RpcFailure } from '../src/rpc.ts';
+import { DEFAULT_PERMISSIONS } from '@app/catalog';
 import { FakeRpc } from './fake-rpc.ts';
 
 const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
@@ -82,11 +83,20 @@ describe('App flow', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('bad project');
     rpc.handle('projects.create', (p) => ({ ...project, ...p, id: 'rust-cli-1' })).handle('lessons.list', () => []);
     await user.click(screen.getByRole('button', { name: 'Create project' }));
-    expect(rpc.calls.filter((c) => c.method === 'projects.create').at(-1)!.params).toEqual({ title: 'Rust CLI', goal: 'Ship a CLI', why: '', workspace: '/tmp/ws', testCommand: 'cargo test' });
+    expect(rpc.calls.filter((c) => c.method === 'projects.create').at(-1)!.params).toEqual({
+      title: 'Rust CLI',
+      goal: 'Ship a CLI',
+      why: '',
+      workspace: '/tmp/ws',
+      testCommand: 'cargo test',
+      agent: DEFAULT_PERMISSIONS,
+    });
     expect(await screen.findByText(/Lessons appear here/)).toBeInTheDocument();
     rpc.handle('ask', () => ({ askId: 'a1' }));
-    await user.click(screen.getByRole('button', { name: 'Start the interview' }));
-    expect(rpc.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ projectId: 'rust-cli-1', question: expect.stringMatching(/Interview me/) });
+    // A folder of existing work: the tutor starts from it (or from scratch, if the learner prefers).
+    await user.click(screen.getByRole('button', { name: 'Start from my existing work' }));
+    expect(rpc.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ projectId: 'rust-cli-1', question: expect.stringMatching(/I already have work/) });
+
   });
 
   it('reports profile errors', async () => {
@@ -206,5 +216,55 @@ describe('MePanel', () => {
     await user.selectOptions(screen.getByRole('combobox'), 'interaction');
     await waitFor(() => expect(updates.map((u) => u.settings.changeMode)).toContain('auto'));
     expect(updates.at(-1)!.settings.sessionMode).toBe('interaction');
+  });
+});
+
+describe('coming back after a restart', () => {
+  function placed(place: Record<string, unknown>) {
+    const sets: Record<string, unknown>[] = [];
+    const rpc = baseRpc()
+      .handle('place.get', () => place)
+      .handle('place.set', (p: Record<string, unknown>) => {
+        sets.push(p);
+        return {};
+      });
+    return { rpc, sets };
+  }
+
+  it('opens the profile, project, lesson and panel the learner was on, and remembers moves', async () => {
+    const user = userEvent.setup();
+    const { rpc, sets } = placed({ profileId: profile.id, projectId: project.id, view: 'lesson', lessonId: 'hmp-09-four-numbers', margin: 'me' });
+    mount(rpc, <App />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Four Numbers, Three Speeds' })).toBeInTheDocument();
+    expect(await screen.findByText(/No evidence yet/)).toBeInTheDocument();
+    await waitFor(() => expect(sets.at(-1)).toEqual({ view: 'lesson', lessonId: 'hmp-09-four-numbers', margin: 'me', editor: false, file: null }));
+    await user.click(screen.getByRole('button', { name: /^History/ }));
+    await waitFor(() => expect(sets.at(-1)).toMatchObject({ margin: 'history' }));
+    await user.click(screen.getByRole('button', { name: 'Projects' }));
+    expect(sets.at(-1)).toEqual({ projectId: null, view: null, lessonId: null, margin: null, editor: null, file: null });
+  });
+
+  it('opens the first lesson when the remembered one is gone', async () => {
+    const { rpc } = placed({ profileId: profile.id, projectId: project.id, view: 'lesson', lessonId: 'deleted-lesson' });
+    mount(rpc, <App />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Four Numbers, Three Speeds' })).toBeInTheDocument();
+    expect(rpc.calls.filter((c) => c.method === 'lessons.get').map((c) => (c.params as { lessonId: string }).lessonId)).not.toContain('deleted-lesson');
+  });
+
+  it('opens the project list when the project is gone, and the picker when the profile cannot be opened', async () => {
+    const user = userEvent.setup();
+    const gone = placed({ profileId: profile.id, projectId: 'deleted' });
+    const view = mount(gone.rpc, <App />);
+    expect(await screen.findByRole('button', { name: /Heavy Metal Physics/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /switch/ }));
+    expect(gone.sets.at(-1)).toEqual({ profileId: null });
+    view.unmount();
+
+    const locked = placed({ profileId: profile.id });
+    locked.rpc.handle('profiles.open', () => {
+      throw new RpcFailure({ code: 'conflict', message: 'open in another window' });
+    });
+    mount(locked.rpc, <App />);
+    expect(await screen.findByRole('heading', { name: 'Who is learning?' })).toBeInTheDocument();
   });
 });

@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { ServerEvents, TranscriptEntry } from '@app/server/protocol';
 import { useEvent, useRpc } from '../hooks.tsx';
-import { Markdown } from '../lesson/Markdown.tsx';
+import { Markdown, type CodeGate } from '../lesson/Markdown.tsx';
 import { PixelMark } from '../PixelMark.tsx';
 import { describeTool } from './activity.ts';
 import { Proposals } from './Proposals.tsx';
 import { FormCard } from './FormCard.tsx';
 import { applyEntry, replay, type Step, type Turn } from './turns.ts';
+import { AddFilesButton, AttachedList, FileDrop, useAttach, type Attached } from '../sources.tsx';
 import type { FormAnswer } from '@app/catalog';
 
 export interface AskRequest {
@@ -16,8 +17,32 @@ export interface AskRequest {
   readonly nonce: number;
 }
 
+/** The nearest ancestor that scrolls (the page, or the chat margin). */
+export function scrollerOf(el: HTMLElement | null): HTMLElement | undefined {
+  for (let p = el?.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY;
+    if (y === 'auto' || y === 'scroll') return p;
+  }
+  return undefined;
+}
+
+/** Laid out on screen (not inside something hidden). */
+const isShown = (el: HTMLElement | null) => el !== null && el.getClientRects().length > 0;
+
+/** Run `fn` on the next frame (or soon, where there are no frames); returns a cancel function. */
+function nextFrame(fn: () => void): () => void {
+  if (typeof requestAnimationFrame === 'function') {
+    const id = requestAnimationFrame(fn);
+    return () => cancelAnimationFrame(id);
+  }
+  const id = setTimeout(fn, 16);
+  return () => clearTimeout(id);
+}
+
 // Stable defaults: a fresh `() => {}` per render would re-run the request effect forever.
 const NOOP = () => undefined;
+/** Sent by "Continue" after a turn was cut off; the core tells the tutor what it had done. */
+export const CONTINUE = 'Please continue where you left off.';
 const NOOP_BUSY = (_busy: boolean) => undefined;
 
 const STEP_STATE: Record<string, 'done' | 'failed' | 'working'> = { completed: 'done', failed: 'failed' };
@@ -67,6 +92,7 @@ export function Conversation({
   onBusy = NOOP_BUSY,
   variant = 'page',
   proposals = true,
+  gate,
 }: {
   projectId: string;
   lessonId: string | undefined;
@@ -83,26 +109,52 @@ export function Conversation({
   variant?: 'page' | 'chat';
   /** Show pending proposals at the end of the conversation (off when another view shows them). */
   proposals?: boolean;
+  /** Hides code in replies that looks like the solution to an open task. */
+  gate?: CodeGate | undefined;
 }) {
   const rpc = useRpc();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
   const [selection, setSelection] = useState<{ text: string; anchor?: string }>();
-  const endRef = useRef<HTMLDivElement>(null);
   /** The last request handled: each request is acted on exactly once, whatever else re-renders. */
   const handled = useRef<number | undefined>(undefined);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const apply = useCallback((e: TranscriptEntry) => setTurns((ts) => applyEntry(ts, e)), []);
+  // Streamed text arrives in many small chunks; re-rendering the Markdown (and its maths) for
+  // each one makes long answers stutter. Chunks are gathered and applied once per frame; any
+  // other event first applies what is waiting, so the order never changes.
+  const queue = useRef<TranscriptEntry[]>([]);
+  const frame = useRef<(() => void) | undefined>(undefined);
+  const flush = useCallback(() => {
+    frame.current = undefined;
+    const waiting = queue.current.splice(0);
+    if (waiting.length) setTurns((ts) => waiting.reduce(applyEntry, ts));
+  }, []);
+  const apply = useCallback(
+    (e: TranscriptEntry) => {
+      queue.current.push(e);
+      if (e.t === 'event' && e.event.kind === 'text') {
+        frame.current ??= nextFrame(flush);
+      } else {
+        frame.current?.();
+        flush();
+      }
+    },
+    [flush],
+  );
+  useEffect(() => () => frame.current?.(), []);
   const thread = variant === 'chat' ? 'chat' : 'session';
 
   // The saved conversation comes first; anything that happened while it loaded stays after it.
   useEffect(() => {
     let live = true;
-    rpc.call('conversations.get', { projectId, thread }).then(
-      (entries) => {
+    // A turn still running (the page was reloaded while the tutor worked) goes on; others that
+    // never ended were cut off by a restart.
+    const inProgress = rpc.call('conversations.running', { projectId, thread }).catch(() => [] as string[]);
+    Promise.all([rpc.call('conversations.get', { projectId, thread }), inProgress]).then(
+      ([entries, ids]) => {
         if (!live) return;
-        const saved = replay(entries);
+        const saved = replay(entries, new Set(ids));
         setTurns((ts) => [...saved, ...ts.filter((t) => !t.askId || !saved.some((x) => x.askId === t.askId))]);
       },
       () => undefined, // nothing saved can be read: start empty
@@ -132,6 +184,7 @@ export function Conversation({
         state: 'running',
       };
       onActivity();
+      fromBottom.current = 0; // a new message: show it, and follow the answer
       try {
         const { askId } = await rpc.call('ask', {
           projectId,
@@ -162,9 +215,24 @@ export function Conversation({
     }
   }, [request, send, onActivity]);
 
+  // Scrolling keeps the learner's distance from the bottom: at the bottom, the view follows the
+  // tutor as it writes; scrolled up to read, it stays put while new steps arrive below.
+  const sectionRef = useRef<HTMLElement>(null);
+  const fromBottom = useRef(0);
   useEffect(() => {
-    // Braces matter: newer browsers return a Promise from scrollIntoView, which React would treat as a cleanup.
-    void endRef.current?.scrollIntoView?.({ block: 'end' });
+    const scroller = scrollerOf(sectionRef.current);
+    if (!scroller) return;
+    const remember = () => {
+      // The scroller can be shared with a lesson (the page): only count scrolling while this is shown.
+      if (isShown(sectionRef.current)) fromBottom.current = Math.max(0, scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight);
+    };
+    scroller.addEventListener('scroll', remember, { passive: true });
+    return () => scroller.removeEventListener('scroll', remember);
+  }, []);
+  useLayoutEffect(() => {
+    const scroller = scrollerOf(sectionRef.current);
+    if (!scroller || !isShown(sectionRef.current)) return;
+    scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight - fromBottom.current;
   }, [turns]);
 
   const running = turns.find((t) => t.state === 'running' && t.askId);
@@ -173,15 +241,22 @@ export function Conversation({
     onBusy(busy);
   }, [busy, onBusy]);
 
+  // Files dropped or picked here are copied into the project right away; the next message tells
+  // the tutor about them.
+  const attach = useAttach(rpc, projectId);
+  const added = attach.items.filter((a) => a.state === 'done');
+  const sending = attach.items.some((a) => a.state === 'sending');
   const submit = () => {
-    if (input.trim() === '') return;
-    void send(input.trim(), selection);
+    if ((input.trim() === '' && added.length === 0) || sending) return;
+    void send(withFiles(input.trim(), added), selection);
     setInput('');
     setSelection(undefined);
+    attach.clear();
   };
 
   return (
-    <section className={`conversation ${variant}`} aria-label={variant === 'chat' ? 'Tutor' : 'Session'}>
+    <FileDrop onFiles={(files) => void attach.add(files)} className="conversation-drop">
+    <section ref={sectionRef} className={`conversation ${variant}`} aria-label={variant === 'chat' ? 'Tutor' : 'Session'}>
       {backTo && onBack && (
         <button type="button" className="text back" onClick={onBack}>
           ← Back to {backTo}
@@ -213,7 +288,7 @@ export function Conversation({
               ) : (
                 <Steps steps={t.steps} blocked={t.blocked} />
               )}
-              {t.answer && <Markdown md={t.answer} />}
+              {t.answer && <Markdown md={t.answer} gate={gate} />}
               {t.forms.map((f, fi) => (
                 <FormCard
                   key={fi}
@@ -232,12 +307,20 @@ export function Conversation({
                 </p>
               )}
               {t.state === 'cancelled' && <p className="quiet">Stopped.</p>}
-              {t.state === 'interrupted' && <p className="quiet">Cut off: the app closed before your tutor finished. Ask again to pick up.</p>}
+              {t.state === 'interrupted' && (
+                <p className="quiet interrupted">
+                  Cut off: the app closed before your tutor finished. What it had saved is kept.
+                  {i === turns.length - 1 && !busy && (
+                    <button type="button" onClick={() => void send(CONTINUE)}>
+                      Continue
+                    </button>
+                  )}
+                </p>
+              )}
             </div>
           </div>
         ))}
-        {proposals && <Proposals />}
-        <div ref={endRef} />
+        {proposals && <Proposals projectId={projectId} />}
       </div>
       <form
         className="compose"
@@ -257,6 +340,7 @@ export function Conversation({
             </button>
           </p>
         )}
+        <AttachedList items={attach.items} onRemove={attach.remove} />
         <textarea
           ref={inputRef}
           aria-label={variant === 'chat' ? 'Your question' : 'Your message'}
@@ -273,17 +357,27 @@ export function Conversation({
         />
         <div className="compose-row">
           <span className="quiet">{variant === 'chat' ? 'Ctrl + Enter to send' : "Ctrl + Enter to send. Your tutor explains and hints; it won't write your solution."}</span>
+          <AddFilesButton onFiles={(files) => void attach.add(files)} label="Add files" />
           {running ? (
             <button type="button" onClick={() => void rpc.call('ask.cancel', { askId: running.askId! })}>
               Stop
             </button>
           ) : (
-            <button type="submit" className="primary" disabled={input.trim() === ''}>
+            <button type="submit" className="primary" disabled={(input.trim() === '' && added.length === 0) || sending}>
               Send
             </button>
           )}
         </div>
       </form>
     </section>
+    </FileDrop>
   );
+}
+
+/** The message, with a line telling the tutor which files were just added (it reads them with its tools). */
+export function withFiles(message: string, added: readonly Attached[]): string {
+  if (added.length === 0) return message;
+  const list = added.map((a) => `"${a.name}" (${a.source!.id})`).join(', ');
+  const note = `I added ${added.length === 1 ? 'a file' : `${added.length} files`} to the project: ${list}.`;
+  return message ? `${message}\n\n${note}` : `${note} Have a look.`;
 }

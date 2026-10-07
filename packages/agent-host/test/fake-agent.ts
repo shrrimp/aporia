@@ -1,9 +1,10 @@
 import * as acp from '@agentclientprotocol/sdk';
-import type { NewSessionRequest, PermissionOption, ToolCallUpdate } from '@agentclientprotocol/sdk';
+import type { NewSessionRequest, PermissionOption, ResumeSessionRequest, ToolCallUpdate } from '@agentclientprotocol/sdk';
 
 export interface FakeAgentLog {
   sessions: NewSessionRequest[];
   cancelled: string[];
+  resumed?: ResumeSessionRequest[];
 }
 
 const OPTIONS = [
@@ -16,18 +17,24 @@ const OPTIONS = [
  * A scripted ACP agent. The first word of the prompt selects a behaviour; it reports what
  * happened as agent text so tests can assert on the client's answers.
  */
-export function fakeAgent(log: FakeAgentLog = { sessions: [], cancelled: [] }): acp.AgentApp {
+export function fakeAgent(log: FakeAgentLog = { sessions: [], cancelled: [] }, opts: { resume?: boolean } = {}): acp.AgentApp {
   let n = 0;
   return acp
     .agent({ name: 'fake-agent' })
     .onRequest(acp.methods.agent.initialize, async () => ({
       protocolVersion: acp.PROTOCOL_VERSION,
-      agentCapabilities: { loadSession: false },
+      agentCapabilities: { loadSession: false, ...(opts.resume ? { sessionCapabilities: { resume: {} } } : {}) },
       agentInfo: { name: 'fake', version: '0.0.0' },
     }))
     .onRequest(acp.methods.agent.session.new, async ({ params }) => {
       log.sessions.push(params);
       return { sessionId: `s${++n}` };
+    })
+    // Sessions it "remembers" are the ones named s<number>.
+    .onRequest(acp.methods.agent.session.resume, async ({ params }) => {
+      if (!/^s\d+$/.test(params.sessionId)) throw acp.RequestError.resourceNotFound(params.sessionId);
+      (log.resumed ??= []).push(params);
+      return {};
     })
     .onNotification(acp.methods.agent.session.cancel, async ({ params }) => {
       log.cancelled.push(params.sessionId);
@@ -115,6 +122,15 @@ export function fakeAgent(log: FakeAgentLog = { sessions: [], cancelled: [] }): 
           }
           break;
         }
+        case 'auth':
+          // The Claude adapter's login report; extra fields (an email) must never reach the app.
+          await client.notify('_auth/status_update', { authStatus: { kind: arg, label: arg === 'none' ? 'Not logged in' : 'Claude Pro', email: 'ada@example.com' } });
+          await client.notify('_auth/status_update', { authStatus: { label: 'no kind' } });
+          await client.notify('_auth/status_update', { authStatus: { kind: 'apiKey' } });
+          await say('auth');
+          break;
+        case 'login':
+          throw acp.RequestError.authRequired();
         default:
           await say(`unknown:${text}`);
       }

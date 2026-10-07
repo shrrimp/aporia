@@ -23,7 +23,24 @@ export function answerText(a: FormAnswer | undefined): string {
   if ('text' in a) return a.text || '—';
   if ('number' in a) return String(a.number);
   if ('scale' in a) return `${a.scale}/5`;
+  if ('line' in a) return `line ${a.line}`;
   return a.order.join(' › ');
+}
+
+/** "Spot the bug": every line of the snippet is a choice. */
+function Line({ q, value, onChange }: { q: Extract<FormQuestion, { kind: 'line' }>; value: FormAnswer | undefined; onChange: (a: FormAnswer) => void }) {
+  const chosen = value && 'line' in value ? value.line : undefined;
+  return (
+    <div className={`f-lines lang-${q.lang}`} role="radiogroup" aria-label={q.prompt}>
+      {q.code.split('\n').map((text, i) => (
+        <label key={i} className={chosen === i + 1 ? 'on' : ''}>
+          <input type="radio" name={q.id} aria-label={`Line ${i + 1}`} checked={chosen === i + 1} onChange={() => onChange({ line: i + 1 })} />
+          <span className="ln num">{i + 1}</span>
+          <code>{text || ' '}</code>
+        </label>
+      ))}
+    </div>
+  );
 }
 
 function Choice({ q, value, onChange }: { q: Extract<FormQuestion, { kind: 'single' | 'multi' }>; value: FormAnswer | undefined; onChange: (a: FormAnswer | undefined) => void }) {
@@ -174,6 +191,7 @@ export function FormCard({ form, onSubmit, submitted }: { form: LearnerForm; onS
                 {(q.kind === 'single' || q.kind === 'multi') && <Choice q={q} value={unsure ? undefined : a} onChange={(v) => set(q.id, v)} />}
                 {q.kind === 'scale' && <Scale q={q} value={a} onChange={(v) => set(q.id, v)} />}
                 {q.kind === 'rank' && <Rank q={q} value={a} onChange={(v) => set(q.id, v)} />}
+                {q.kind === 'line' && <Line q={q} value={unsure ? undefined : a} onChange={(v) => set(q.id, v)} />}
                 {q.kind === 'text' &&
                   (q.long ? (
                     <textarea

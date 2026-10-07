@@ -101,6 +101,13 @@ function connection(ws: WebSocket, app: AppService): void {
   });
 }
 
+/** The UI never needs the network: only itself and its own socket. Workers (the editor's) load from the app too. */
+const SECURITY_HEADERS = {
+  'content-security-policy':
+    "default-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self'",
+  'x-content-type-options': 'nosniff',
+};
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse, dir: string | undefined): Promise<void> {
   if (!dir || (req.method !== 'GET' && req.method !== 'HEAD')) {
     res.writeHead(404).end();
@@ -118,15 +125,14 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse, dir: strin
       .writeHead(200, {
         'content-type': MIME[path.extname(file)] ?? 'application/octet-stream',
         // The UI never needs the network: only itself and its own socket.
-        'content-security-policy': "default-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
-        'x-content-type-options': 'nosniff',
+        ...SECURITY_HEADERS,
       })
       .end(body);
   } catch {
-    // Single-page app: unknown paths get the shell.
+    // Single-page app: unknown paths get the shell, under the same policy.
     try {
       const shell = await readFile(path.join(dir, 'index.html'));
-      res.writeHead(200, { 'content-type': MIME['.html']! }).end(shell);
+      res.writeHead(200, { 'content-type': MIME['.html']!, ...SECURITY_HEADERS }).end(shell);
     } catch {
       res.writeHead(404).end();
     }

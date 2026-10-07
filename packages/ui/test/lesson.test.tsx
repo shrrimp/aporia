@@ -7,6 +7,8 @@ import { fourNumbers } from '../../catalog/fixtures/four-numbers.ts';
 import { LessonView } from '../src/lesson/LessonView.tsx';
 import { LessonActionsContext, type LessonActions } from '../src/lesson/actions.tsx';
 import { Block } from '../src/lesson/Blocks.tsx';
+import { Drill } from '../src/lesson/Drill.tsx';
+import { ProgressContext } from '../src/lesson/progress.tsx';
 import { Diagram } from '../src/lesson/Diagram.tsx';
 import { Plot } from '../src/lesson/Plot.tsx';
 import { Explorable, initialEnv } from '../src/lesson/Explorable.tsx';
@@ -51,7 +53,7 @@ describe('LessonView', () => {
     expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/stuck on task "integratePosition"/), { anchor: 'task:step-2' });
     await user.type(screen.getByLabelText('Your explanation'), 'Rotate into the parent frame at the midpoint orientation.');
     await user.click(screen.getByRole('button', { name: 'Send to your tutor' }));
-    expect(a.ask).toHaveBeenLastCalledWith(expect.stringMatching(/Explain-back[\s\S]*Rubric: velocity must be rotated/));
+    expect(a.ask).toHaveBeenLastCalledWith(expect.stringMatching(/Explain-back[\s\S]*Rubric: velocity must be rotated[\s\S]*send me back to the lesson/), { anchor: expect.stringMatching(/\/\d+$/) });
     expect(screen.getByRole('button', { name: 'Sent to your tutor' })).toBeDisabled();
   });
 });
@@ -94,7 +96,7 @@ describe('drills', () => {
     );
     await user.type(screen.getByLabelText('Your answer'), 'my answer');
     await user.click(screen.getByRole('button', { name: 'Check' }));
-    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/Judge my answer to drill item "s"[\s\S]*Reference: ref/));
+    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/Judge my answer to drill item "s"[\s\S]*Reference: ref[\s\S]*send me back to the lesson/), undefined);
     expect(screen.getByText('Sent to your tutor for feedback.')).toBeInTheDocument();
     await user.click(screen.getByLabelText('x'));
     await user.click(screen.getByRole('button', { name: 'Lock in my guess' }));
@@ -295,5 +297,48 @@ describe('Explorable', () => {
     );
     expect(screen.getByRole('img', { name: 'pt' })).toBeInTheDocument();
     expect(within(document.body).queryByLabelText('Your prediction')).toBeNull();
+  });
+});
+
+describe('two-tier questions', () => {
+  it('ask why after the answer, and give full credit only for both', async () => {
+    const user = userEvent.setup();
+    const recorded: unknown[] = [];
+    const item = {
+      id: 'tt',
+      kind: 'mcq' as const,
+      prompt: 'Which side does exp(ω dt) go on?',
+      options: ['Left', 'Right'],
+      answer: 1,
+      reason: { prompt: 'Why?', options: ['ω is in world coordinates', 'ω is in body coordinates'], answer: 1 },
+      kcs: ['quaternion.exp-map-side'],
+      difficulty: 3,
+      why: 'Body-frame ω multiplies on the right.',
+      transfer: false,
+    };
+    render(
+      <LessonActionsContext.Provider value={{ recordAnswer: (a) => recorded.push(a), ask: () => undefined }}>
+        <Drill doc={{ purpose: 'practice', confidence: false, items: [item] }} />
+      </LessonActionsContext.Provider>,
+    );
+    await user.click(screen.getByLabelText('Right'));
+    expect(screen.getByRole('button', { name: 'Check' })).toBeDisabled(); // the reason is part of the answer
+    await user.click(screen.getByLabelText('ω is in world coordinates'));
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+    expect(screen.getByRole('status')).toHaveTextContent('Partly right (25%). The answer is right, but not the reason');
+    expect(recorded[0]).toMatchObject({ itemId: 'tt', evidenceType: 'recognition', outcome: 0.25 });
+    expect(screen.getByLabelText('ω is in body coordinates').closest('label')).toHaveClass('answer');
+  });
+
+  it('restore both choices', () => {
+    const item = { id: 'tt', kind: 'mcq' as const, prompt: 'p', options: ['a', 'b'], answer: 0, reason: { prompt: 'Because?', options: ['r0', 'r1'], answer: 0 }, kcs: ['k'], difficulty: 3, why: 'w', transfer: false };
+    render(
+      <ProgressContext.Provider value={{ saved: { 'item:tt': { choice: 0, reason: 0, result: 1 } }, save: () => undefined }}>
+        <Drill doc={{ purpose: 'practice', confidence: false, items: [item] }} />
+      </ProgressContext.Provider>,
+    );
+    expect(screen.getByText('Right.')).toBeInTheDocument();
+    expect(screen.getByLabelText('r0')).toBeChecked();
+    expect(screen.getByRole('radiogroup', { name: 'Because?' })).toBeInTheDocument();
   });
 });

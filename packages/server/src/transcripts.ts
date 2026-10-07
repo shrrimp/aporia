@@ -104,3 +104,23 @@ export function recap(entries: readonly TranscriptEntry[], maxChars = 6000): str
     .filter(Boolean)
     .join('\n');
 }
+
+/**
+ * A note for the tutor when its last turn here never finished (the app closed or crashed while
+ * it worked): what it had done, and that its saved work is kept. Undefined when the last turn
+ * ended, or is still running (`running`: ask ids in progress).
+ */
+export function cutOff(entries: readonly TranscriptEntry[], running: ReadonlySet<string>): string | undefined {
+  const last = entries.findLast((e) => e.t === 'ask');
+  if (!last || running.has(last.askId) || entries.some((e) => e.t === 'end' && e.askId === last.askId)) return undefined;
+  const steps = [
+    ...new Set(entries.flatMap((e) => (e.t === 'event' && e.askId === last.askId && e.event.kind === 'tool' && e.event.title ? [e.event.title] : []))),
+  ];
+  return [
+    '<interrupted-turn>',
+    `Your previous turn here was cut off: the app closed before you finished answering "${last.question.slice(0, 300)}".`,
+    steps.length ? `Steps you had taken: ${steps.slice(-20).join('; ')}.` : 'You had not taken any step yet.',
+    'Everything you saved through your tools is kept (drafts, proposals, evidence, files). Check what is there with your tools before redoing anything. Unless the learner now asks for something else, finish that work first.',
+    '</interrupted-turn>',
+  ].join('\n');
+}
