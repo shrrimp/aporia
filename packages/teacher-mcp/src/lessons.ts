@@ -1,5 +1,5 @@
 import { lesson as lessonSchema, normalizeLesson, type DrillItem, type Lesson } from '@app/catalog';
-import { itemMemories, reviewQueue, REVIEW_CAP, type ChangeService, type OpenProfile } from '@app/core';
+import type { ChangeService, OpenProfile } from '@app/core';
 import { lessonsDir } from './paths.ts';
 
 /** Ids of the project's lessons (applied, so a draft waiting for review is not one yet), in id order. */
@@ -27,7 +27,11 @@ export interface ReviewItem {
   readonly item: DrillItem;
 }
 
-/** Drill items the app can score on its own, keyed like their evidence (`lesson/item`). Short answers need the tutor, so they are left out. */
+/**
+ * Drill items the app can score on its own, keyed like their evidence (`lesson/item`): what a
+ * review falls back on until the bank has questions on a skill. Short answers need the tutor, so
+ * they are left out.
+ */
 export function reviewableItems(lessons: readonly Lesson[]): Map<string, ReviewItem> {
   const out = new Map<string, ReviewItem>();
   for (const l of lessons) {
@@ -40,21 +44,4 @@ export function reviewableItems(lessons: readonly Lesson[]): Map<string, ReviewI
     }
   }
   return out;
-}
-
-export interface ProjectReviews {
-  readonly due: readonly (ReviewItem & { readonly itemId: string; readonly retrievability: number; readonly reviews: number })[];
-  readonly dueCount: number;
-  readonly nextDue?: string;
-}
-
-/** What is due for review in a project now (pedagogy-model §7). */
-export async function projectReviews(profile: Pick<OpenProfile, 'changes' | 'journal'>, projectId: string, now: Date, cap = REVIEW_CAP): Promise<ProjectReviews> {
-  const items = reviewableItems(await projectLessons(profile, projectId));
-  const q = reviewQueue(itemMemories(profile.journal.events, projectId), items.keys(), now, cap);
-  return {
-    due: q.due.map((d) => ({ ...items.get(d.itemId)!, itemId: d.itemId, retrievability: d.retrievability, reviews: d.reviews })),
-    dueCount: q.dueCount,
-    ...(q.nextDue ? { nextDue: q.nextDue } : {}),
-  };
 }

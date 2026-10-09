@@ -305,7 +305,7 @@ describe('brain view', () => {
   it('opens from home and from the learner panel', async () => {
     reducedMotion(true);
     const user = userEvent.setup();
-    const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+    const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
     const project: ProjectDTO = { id: 'p-1', title: 'HMP', goal: 'g', why: '', createdAt: '2026-10-05T10:00:00.000Z' };
     const r = new FakeRpc()
       .handle('app.info', () => ({ name: 'Aporia', id: 'aporia', tagline: 't', agent: 'Fake' }))
@@ -334,7 +334,7 @@ describe('brain view', () => {
   it('is where the app reopens if the learner was on it', async () => {
     reducedMotion(true);
     const user = userEvent.setup();
-    const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+    const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
     const sets: unknown[] = [];
     const r = new FakeRpc()
       .handle('app.info', () => ({ name: 'Aporia', id: 'aporia', tagline: 't', agent: 'Fake' }))

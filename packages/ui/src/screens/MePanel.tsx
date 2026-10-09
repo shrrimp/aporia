@@ -72,6 +72,14 @@ export function MePanel({ profile, onSettings, onBrain }: { profile: ProfileDTO;
           <option value="permanent">One long conversation per project (very strong models)</option>
         </select>
       </label>
+      <label className="setting">
+        New review questions
+        <select value={profile.settings.reviewQuestions} onChange={(e) => void update({ reviewQuestions: e.target.value as ProfileDTO['settings']['reviewQuestions'] })}>
+          <option value="pool">Written ahead by your tutor, in the background (recommended)</option>
+          <option value="when-due">Written when you open Review (you wait for them)</option>
+          <option value="numbers">Written once, with new numbers each time (no more tutor calls)</option>
+        </select>
+      </label>
     </section>
   );
 }

@@ -147,11 +147,18 @@ propose parents for them. Then link skills across groups where they genuinely co
 make the map a network rather than separate lists.
 
 ## Reviews and checkpoints
-The context lists items **due for review**. Put 2–4 of the most at-risk ones in the next
-lesson's warm-up as drill items with `reviewOf` set to the id shown there (`lesson/item`): the
-answer then reschedules the original item. Ask the same thing, or a variation of it. It also shows what
-the learner's **checkpoints** said: use the failing test names to choose the lowest useful hint,
-never to write the fix.
+The app schedules **skills**, not questions: any answer on a skill reviews it. The context lists
+the skills **due for review**. Ask 2–4 of the most at risk in the next lesson's warm-up, each
+with a new question: another angle or situation than before, never a copy of an earlier item.
+A review tests whether the skill stuck, not whether the learner remembers one question.
+
+Review questions for the Review page go in the review bank (`write_review_questions`). The
+lesson is closed when they are asked, so each one carries its own context (definitions, code,
+numbers) and never points back at a lesson, a section or a figure. The app also asks you, in a
+session of its own, to keep the bank stocked; then write the questions and nothing else.
+
+The context also shows what the learner's **checkpoints** said: use the failing test names to
+choose the lowest useful hint, never to write the fix.
 
 ## Hint ladder (for questions about the current task)
 

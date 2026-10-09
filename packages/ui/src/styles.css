@@ -425,8 +425,19 @@ figcaption { font: italic 0.9rem/1.5 var(--serif); color: var(--text-faint); mar
 .review .standfirst-plain { font-family: var(--serif); color: var(--text-soft); }
 .review-count { color: var(--text-soft); margin: 1.6rem 0 0.4rem; }
 .review-items { display: grid; gap: 1.6rem; margin-top: 1rem; }
-.review-from { margin: 0 0 0.3rem; font-size: 0.8rem; color: var(--text-faint); }
+.review-from { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--text-faint); }
 .review-item { list-style: none; padding: 0; margin: 0; }
+/* One due skill: its name, what the question needs, the question. */
+.review-card { border-top: 1px solid var(--rule); padding-top: 1rem; }
+.review-skill { color: var(--accent); font-weight: 500; font-size: 0.85rem; }
+.review-seen { padding: 0 0.4rem; border: 1px solid var(--rule-strong); border-radius: var(--r); }
+.review-context { margin: 0 0 0.9rem; padding: 0.7rem 0.9rem; border: 1px solid var(--rule); border-left: 2px solid var(--rule-strong); border-radius: var(--r); background: var(--raise); font: 0.95rem/1.6 var(--serif); color: var(--text-soft); overflow-wrap: anywhere; }
+.review-context .md p:last-child { margin-bottom: 0; }
+.review-context .md pre { margin-bottom: 0.4rem; }
+.review-flag { margin: 0.7rem 0 0; font-size: 0.8rem; }
+.review-flag button.text { color: var(--text-faint); }
+.review-card.waiting .quiet, .review-card.flagged .quiet { margin: 0; }
+.review-writing { display: flex; align-items: center; gap: 0.5rem; color: var(--text-soft); font-size: 0.88rem; margin: 0 0 0.6rem; }
 .row-meta .due { color: var(--accent); }
 .conversation { max-width: var(--measure); margin: 0 auto; display: flex; flex-direction: column; min-height: calc(100vh - 12rem); overflow-wrap: anywhere; }
 .conversation > .thread { flex: 1; display: flex; flex-direction: column; min-width: 0; }

@@ -9,7 +9,7 @@ import { Conversation } from '../src/screens/Conversation.tsx';
 import { ProjectView } from '../src/screens/ProjectView.tsx';
 import { FakeRpc } from './fake-rpc.ts';
 
-const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
 const project: ProjectDTO = { id: 'p-1', title: 'P', goal: 'g', why: '', createdAt: '2026-10-05T10:00:00.000Z' };
 const status = (state: AgentStatusDTO['state'], extra: Partial<AgentStatusDTO> = {}): AgentStatusDTO => ({ agent: 'Claude Code', state, ...extra });
 

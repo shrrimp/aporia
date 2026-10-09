@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { LearnerForm } from '@app/catalog';
-import { lessonIds, projectReviews, type ProjectReviews } from './lessons.ts';
+import { lessonIds } from './lessons.ts';
+import { projectReviews, type ProjectReviews } from './reviews.ts';
 import { projectTarget } from './paths.ts';
 import { readSkillMap } from './skills.ts';
 import { readSources, type SourcesDoc } from './sources.ts';
@@ -49,7 +50,7 @@ export function systemPrompt(): string {
   return `${RULES.constitution}\n\n${RULES.lessonAuthoring}\n\nCall get_teaching_context before teaching.`;
 }
 
-export { lessonsDir, lessonTarget, projectTarget } from './paths.ts';
+export { lessonsDir, lessonTarget, projectTarget, reviewsTarget } from './paths.ts';
 
 /** Recommended scaffold level for a KC (pedagogy-model §3, §5). */
 export function scaffoldFor(theta: number): number {
@@ -111,11 +112,14 @@ export function hintSummary(events: Parameters<typeof hintStates>[0], projectId:
     .join('\n');
 }
 
-/** Items due for review, for the next warm-up: the tutor reuses them instead of inventing new ones. */
+/** Skills due for review, for the next warm-up: asked again with new questions, never copies (roadmap 1.10). */
 export function reviewSummary(r: ProjectReviews, max = 8): string {
-  if (r.dueCount === 0) return r.nextDue ? `Nothing due. Next item due ${r.nextDue.slice(0, 10)}.` : 'Nothing answered yet, so nothing to review.';
-  const lines = r.due.slice(0, max).map((d) => `- ${d.itemId} (${d.item.kind}, KCs ${d.item.kcs.join(', ')}, recall ≈ ${Math.round(d.retrievability * 100)}%): ${d.item.prompt.replace(/\s+/g, ' ').slice(0, 160)}`);
-  return [`${r.dueCount} item(s) due. Put 2–4 of the most at risk in the next lesson's warm-up, with reviewOf set to the id below (the answer then reschedules it):`, ...lines].join('\n');
+  if (r.dueCount === 0) return r.nextDue ? `Nothing due. Next skill due ${r.nextDue.slice(0, 10)}.` : 'Nothing answered yet, so nothing to review.';
+  const lines = r.due.slice(0, max).map((d) => `- ${d.kc} (${d.title}, recall ≈ ${Math.round(d.retrievability * 100)}%)`);
+  return [
+    `${r.dueCount} skill(s) due. The app schedules skills, not questions: any answer on a skill reviews it. Ask 2–4 of the most at risk in the next lesson's warm-up, each with a new question (another angle or situation than before, never a copy of an earlier item):`,
+    ...lines,
+  ].join('\n');
 }
 
 /** The project's plan and where each planned lesson stands, so the tutor continues it instead of starting over. */

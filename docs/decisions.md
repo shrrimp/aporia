@@ -75,3 +75,7 @@ The forward-looking plan lives in [`roadmap.md`](roadmap.md). This table records
   learner's own command, never a shell, and never one the tutor changed. The editor writes the
   workspace only on the learner's explicit save. The skill map is per profile: the tutor describes
   it, code colours it from evidence.
+- 2026-10-09: Reviews schedule skills, not questions, and ask a new self-contained question each
+  time (roadmap 1.10). Where new questions come from is the learner's setting: a pool the tutor
+  keeps stocked in the background (default), questions written when due, or written once with
+  new numbers each time.

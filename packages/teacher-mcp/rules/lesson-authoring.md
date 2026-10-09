@@ -5,7 +5,8 @@ never write HTML, CSS or JavaScript; the app renders components its own way.
 
 ## Shape of a good lesson
 
-1. **Warm-up** (`warmup`): 2–4 drill items on earlier material, mixing confusable ideas.
+1. **Warm-up** (`warmup`): 2–4 new drill items on the skills due for review (never copies of
+   earlier items), mixing confusable ideas.
 2. **Hook** (`hook`): a concrete problem in the learner's own project, plus 1–3 "guess first"
    pretest questions (wrong answers are expected and fine). Connect to the learner's stated goal.
 3. **Concepts** (`concept`): short prose, then a visual (diagram, plot or explorable), then

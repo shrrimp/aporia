@@ -74,7 +74,36 @@ export function fakeTeacherAgent(log: FakeLog = { prompts: [], sessions: 0 }, op
       const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
       try {
         const question = text.split('The learner asks:\n')[1] ?? '';
-        if (question.startsWith('Interview me')) {
+        if (text.startsWith('<review-questions>')) {
+          // Asked by the app to stock the review bank: two questions per skill, one of them a template.
+          const n = log.prompts.length;
+          const questions = [...text.matchAll(/^## ([a-z0-9.-]+):/gm)].flatMap(([, kc]) => [
+            {
+              kind: 'mcq',
+              angle: 'apply',
+              kcs: [kc],
+              difficulty: 2,
+              why: 'Its components squared add up to 1.',
+              context: 'A unit quaternion $q = (w, x, y, z)$ has $w^2 + x^2 + y^2 + z^2 = 1$.',
+              prompt: `Which of these is a unit quaternion? (${kc}, round ${n})`,
+              options: ['$(1, 0, 0, 0)$', '$(1, 1, 0, 0)$'],
+              answer: 0,
+            },
+            {
+              kind: 'numeric',
+              angle: 'predict',
+              kcs: [kc],
+              difficulty: 2,
+              why: 'For a rotation by $\\theta$, $w = \\cos(\\theta / 2)$.',
+              prompt: `A rotation of {{t}} degrees about z is a unit quaternion. What is its w, to 3 decimals? (${kc}, round ${n})`,
+              vars: { t: { min: 10, max: 170, step: 10 } },
+              answer: '{{ cos(t * pi / 360) }}',
+              tolerance: 0.001,
+            },
+          ]);
+          const r = await tool('write_review_questions', () => mcp.callTool({ name: 'write_review_questions', arguments: { questions, reason: 'stock the bank' } }));
+          await say((r.content as { text: string }[])[0]!.text);
+        } else if (question.startsWith('Interview me')) {
           await tool('get_teaching_context', () => mcp.callTool({ name: 'get_teaching_context', arguments: {} }));
           await pause(900);
           await say("Let's find your starting point. A few quick questions: click what fits, and guessing is fine.");

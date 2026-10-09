@@ -280,7 +280,7 @@ describe('the first session of a project with existing work', () => {
       .handle('ask', () => ({ askId: 'a1' }));
     render(
       <RpcProvider client={r.asClient()}>
-        <ProjectView project={project} profile={{ id: 'prof_1', displayName: 'J', createdAt: '', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } }} onProfile={() => undefined} onBack={() => undefined} />
+        <ProjectView project={project} profile={{ id: 'prof_1', displayName: 'J', createdAt: '', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } }} onProfile={() => undefined} onBack={() => undefined} />
       </RpcProvider>,
     );
     expect(await screen.findByText(/You already have work here and 1 imported file\./)).toBeInTheDocument();

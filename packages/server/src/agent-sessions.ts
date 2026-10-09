@@ -270,6 +270,20 @@ export class AgentSessions {
     }
   }
 
+  /**
+   * One turn the app asks for itself (e.g. writing review questions), in a session of its own
+   * that ends with it. Nothing of it is shown in a conversation.
+   */
+  async background(project: ProjectDTO, prompt: string): Promise<string> {
+    const generation = this.#generation;
+    try {
+      return await this.#ask(project, undefined, prompt, () => undefined, () => undefined);
+    } catch (err) {
+      if (generation === this.#generation) this.#failed(err);
+      throw err;
+    }
+  }
+
   async #ask(
     project: ProjectDTO,
     key: string | undefined,

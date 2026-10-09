@@ -11,12 +11,19 @@ export const slugId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/);
 
 export const changeModeSchema = z.enum(['review', 'auto']);
 export const sessionModeSchema = z.enum(['interaction', 'lesson', 'permanent']);
+export const reviewQuestionsSchema = z.enum(['pool', 'when-due', 'numbers']);
 
 export interface ProfileDTO {
   readonly id: string;
   readonly displayName: string;
   readonly createdAt: string;
-  readonly settings: { changeMode: 'review' | 'auto'; sessionMode: 'interaction' | 'lesson' | 'permanent'; encrypted: boolean };
+  readonly settings: {
+    changeMode: 'review' | 'auto';
+    sessionMode: 'interaction' | 'lesson' | 'permanent';
+    encrypted: boolean;
+    /** Where new review questions come from (roadmap 1.10). */
+    reviewQuestions: z.output<typeof reviewQuestionsSchema>;
+  };
 }
 
 /** An absolute folder path on any desktop OS (POSIX, drive letter, or UNC). */
@@ -98,22 +105,35 @@ export interface CheckpointsDTO {
   readonly tasks: Readonly<Record<string, { readonly reached: boolean; readonly runs: number; readonly recent: readonly CheckpointRunDTO[] }>>;
 }
 
-export interface ReviewItemDTO {
-  /** `lesson/item`, as its answers are recorded. */
-  readonly itemId: string;
-  readonly lessonId: string;
-  readonly lessonTitle: string;
-  readonly item: DrillItem;
+/** One due skill on the Review page, and the question chosen for it (roadmap 1.10). */
+export interface ReviewSlotDTO {
+  readonly kc: string;
+  /** The skill's name. */
+  readonly skill: string;
   /** Estimated probability of recalling it now. */
   readonly retrievability: number;
   readonly reviews: number;
+  /** Absent while there is nothing to ask on the skill yet. */
+  readonly question?: {
+    /** As its answer is recorded: `~reviews/<id>` for a review question, `lesson/item` for a lesson's own item. */
+    readonly id: string;
+    readonly item: DrillItem;
+    /** What the question needs to make sense with the lesson closed. */
+    readonly context?: string;
+    /** Met for the first time, the same template with new numbers, or answered before. */
+    readonly seen: 'new' | 'new-numbers' | 'again';
+    /** For a lesson's own item: the lesson's title. */
+    readonly from?: string;
+  };
 }
 
 export interface ReviewQueueDTO {
-  /** Due items, most at risk first, up to the daily cap. */
-  readonly items: readonly ReviewItemDTO[];
+  /** Due skills, most at risk first, up to the daily cap. */
+  readonly slots: readonly ReviewSlotDTO[];
   readonly dueCount: number;
   readonly nextDue?: string;
+  /** The tutor is writing new questions for this project right now. */
+  readonly writing: boolean;
 }
 
 /** Where the learner stands on a skill: computed by the app from evidence. */
@@ -397,7 +417,7 @@ export const methods = {
   'profiles.list': z.strictObject({}),
   'profiles.create': z.strictObject({ displayName: z.string().trim().min(1).max(60) }),
   'profiles.open': z.strictObject({ profileId: z.string().max(80) }),
-  'profiles.updateSettings': z.strictObject({ changeMode: changeModeSchema.optional(), sessionMode: sessionModeSchema.optional() }),
+  'profiles.updateSettings': z.strictObject({ changeMode: changeModeSchema.optional(), sessionMode: sessionModeSchema.optional(), reviewQuestions: reviewQuestionsSchema.optional() }),
   'projects.list': z.strictObject({}),
   'projects.create': projectInput,
   'projects.update': projectUpdate,
@@ -406,6 +426,16 @@ export const methods = {
   'learner.summary': z.strictObject({}),
   'answers.record': answerInput,
   'reviews.queue': z.strictObject({ projectId: slugId }),
+  'reviews.answer': z.strictObject({
+    projectId: slugId,
+    /** As in the queue: `~reviews/<id>` or `lesson/item`. */
+    questionId: z.string().max(130),
+    evidenceType: z.enum(['production', 'recognition']),
+    outcome: z.number().min(0).max(1),
+    confidence: z.enum(['sure', 'think', 'guess']).optional(),
+  }),
+  /** "Doesn't make sense without the lesson": never asked again, and an answer already given is withdrawn. */
+  'reviews.flag': z.strictObject({ projectId: slugId, questionId: z.string().max(130), evidenceId: z.string().max(80).optional() }),
   'curriculum.get': z.strictObject({ projectId: slugId }),
   'roadmap.setStatus': z.strictObject({ projectId: slugId, milestoneId: slugId, status: z.enum(['planned', 'active', 'done']) }),
   'brain.get': z.strictObject({}),
@@ -463,6 +493,8 @@ export interface Results {
   'learner.summary': LearnerDTO;
   'answers.record': { id: string };
   'reviews.queue': ReviewQueueDTO;
+  'reviews.answer': { id: string };
+  'reviews.flag': { ok: true };
   'curriculum.get': CurriculumDTO;
   'roadmap.setStatus': { ok: true };
   'brain.get': BrainDTO;

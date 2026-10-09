@@ -53,7 +53,7 @@ describe('ProfileStore', () => {
     expect(await store.list()).toEqual([]);
     const a = await store.create('Jules');
     const b = await store.create('Sam');
-    expect(a.settings).toEqual({ changeMode: 'review', sessionMode: 'lesson', encrypted: false });
+    expect(a.settings).toEqual({ changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' });
     expect((await store.list()).map((p) => p.displayName).sort()).toEqual(['Jules', 'Sam']);
     expect(a.id).not.toBe(b.id);
     const updated = await store.updateSettings(a.id, { changeMode: 'auto' });

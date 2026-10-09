@@ -6,3 +6,4 @@ export * from './skills.ts';
 export * from './sources.ts';
 export * from './files.ts';
 export * from './roadmap.ts';
+export * from './reviews.ts';

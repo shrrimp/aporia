@@ -63,7 +63,56 @@ Everything needed to learn Heavy Metal Physics in Aporia instead of in artifacts
   them; only evidence moves a level.
 - **Roadmap**: the project's milestones, proposed one change per milestone, each accepted, rejected or undone.
 
-**Exit test:** I finish one full Heavy Metal Physics lesson in the app: interview → lesson →
+### 1.10 Reviews that test the skill, not the question (added 9 October 2026)
+
+The Review page showed a lesson's own drill items, taken out of the lesson and scheduled one by
+one. Two problems made it close to useless:
+- Out of their lesson, most items lack context: they lean on terms, code or figures the lesson
+  had just shown.
+- The same item comes back every time, so a review tests whether the learner remembers that
+  question, not whether they understood what it was testing.
+
+What changes:
+- **The skill is scheduled, not the question.** FSRS keeps one memory state per skill, folded
+  from every answer that tests it (drills, warm-ups, predictions, reviews). Nothing to migrate:
+  the journal is folded again.
+- **A question bank per project, apart from the lessons.** Review questions are written for
+  review: each one carries the context it needs (definitions, code, numbers), the skills it
+  checks, and its angle (apply, explain, predict, spot the error, compare, recall). The bank is
+  a profile document, validated on every change.
+- **Never the same question twice in a row.** For each due skill, the app picks a question the
+  learner has not answered yet, from a different angle than last time when it can. A question
+  with number placeholders gets new numbers each time it comes back. Only when nothing new
+  exists does an earlier question return, marked as seen before, and never the one from last
+  time if there is another. A question that covers two due skills reviews both.
+- **Self-contained, enforced.** The tutor writes questions through `write_review_questions`. The
+  app refuses a question that points back at the lesson ("the diagram above", "as we saw", "in
+  this lesson"), a copy of an earlier question or of a lesson item, a kind the app cannot score
+  on its own, and a template whose numbers do not work out. Every question has a "Doesn't make
+  sense without the lesson" button: it retires the question, keeps that answer out of the
+  learner model, and asks for a replacement.
+- **Where new questions come from is the learner's setting:**
+  - **A pool, written ahead (default).** After the learner answers in a lesson or a review, the
+    tutor writes new questions in the background for the skills running low (fewer than two
+    unseen), soonest due first. Review opens at once; it uses some of the learner's agent usage.
+  - **When due.** Opening Review asks the tutor for questions on the due skills that have
+    nothing new; the page waits for them.
+  - **Numbers only.** The tutor writes each skill's questions once, as number templates where it
+    can, and the app gives them new numbers each time. No more tutor calls, but conceptual
+    questions come back as they were.
+- **Questions never wait for approval.** Approving a review question would show its answer, so
+  they apply directly; they stay in History, undoable.
+- **The lesson warm-up follows.** The tutor gets the due skills and writes new questions on them
+  instead of copying an earlier item (`reviewOf` is no longer needed).
+
+**Built** 9 October 2026; the exit test below needs a week of real use.
+
+**Exit test:** a day after a lesson, Review shows each due skill with a question I have not seen
+and can make sense of without opening the lesson. A week later the same skills come back with
+different questions. Flagging a question replaces it. With "numbers only", no tutor call
+happens and numeric questions come back with new numbers.
+
+**Phase 1 exit test:** I finish one full Heavy Metal Physics lesson in the app: interview → lesson →
 build with checkpoints → next-day review. I never have to leave the app except for my own
 editor, and no state is lost across restarts.
 

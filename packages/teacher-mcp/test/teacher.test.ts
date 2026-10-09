@@ -97,6 +97,7 @@ describe('teacher MCP server', () => {
       'update_roadmap',
       'update_skill_map',
       'write_file',
+      'write_review_questions',
 ]);
     expect(reg.acpServer).toMatchObject({ type: 'http', url: server.url });
   });
@@ -133,7 +134,7 @@ describe('teacher MCP server', () => {
     expect(checkpointSummary(profile.journal.events, 'hmp')).toContain('failing: t1, t2, t3, t4, t5, …');
   });
 
-  it('lists what is due for review, so the next warm-up can reuse it', async () => {
+  it('lists the skills due for review, so the next warm-up asks them again with new questions', async () => {
     const lesson = structuredClone(fourNumbers) as unknown as { id: string; sections: { id: string; blocks: Record<string, unknown>[] }[] };
     lesson.sections[0]!.blocks.push({
       type: 'drill',
@@ -151,12 +152,12 @@ describe('teacher MCP server', () => {
     for (const itemId of ['w1', 'n1']) {
       await profile.observations.recordEvidence({ author: system, itemId: `${lesson.id}/${itemId}`, projectId: 'hmp', kcs: [{ kc: 'quaternion.unit', weight: 1 }], difficulty: 0, evidenceType: 'production', outcome: 0 });
     }
-    expect(text(await call('get_teaching_context'))).toMatch(/Nothing due\. Next item due 2026-10-05/);
+    expect(text(await call('get_teaching_context'))).toMatch(/Nothing due\. Next skill due 2026-10-05/);
     const due = await projectReviews(profile, 'hmp', new Date('2026-11-01T00:00:00.000Z'));
-    expect(due.dueCount).toBe(2);
+    expect(due.dueCount).toBe(1); // two items, one skill
     const summary = reviewSummary(due, 1);
-    expect(summary).toMatch(/^2 item\(s\) due\. Put 2–4/);
-    expect(summary).toContain(`- ${lesson.id}/`);
+    expect(summary).toMatch(/^1 skill\(s\) due\. The app schedules skills, not questions/);
+    expect(summary).toContain('- quaternion.unit (quaternion.unit, recall ≈');
     expect(summary.split('\n')).toHaveLength(2);
 
     // A lesson that no longer matches the catalog is left out, not shown broken.

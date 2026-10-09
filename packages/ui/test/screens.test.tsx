@@ -12,7 +12,7 @@ import { RpcFailure } from '../src/rpc.ts';
 import { DEFAULT_PERMISSIONS } from '@app/catalog';
 import { FakeRpc } from './fake-rpc.ts';
 
-const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+const profile: ProfileDTO = { id: 'prof_1', displayName: 'Jules', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
 const project: ProjectDTO = { id: 'hmp-abc123', title: 'Heavy Metal Physics', goal: 'Featherstone', why: 'engine', createdAt: '2026-10-05T10:00:00.000Z' };
 
 function baseRpc() {
@@ -213,9 +213,13 @@ describe('MePanel', () => {
     expect(screen.getByText(/Recent first tries: 3\/4/)).toBeInTheDocument();
     expect(screen.getByText('Maths first')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox'));
-    await user.selectOptions(screen.getByRole('combobox'), 'interaction');
+    const [memory, reviews] = screen.getAllByRole('combobox');
+    await user.selectOptions(memory!, 'interaction');
     await waitFor(() => expect(updates.map((u) => u.settings.changeMode)).toContain('auto'));
     expect(updates.at(-1)!.settings.sessionMode).toBe('interaction');
+    expect(reviews).toHaveValue('pool');
+    await user.selectOptions(reviews!, 'when-due');
+    await waitFor(() => expect(updates.at(-1)!.settings.reviewQuestions).toBe('when-due'));
   });
 });
 

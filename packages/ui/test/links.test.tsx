@@ -33,7 +33,7 @@ describe('links in lesson and tutor text', () => {
 });
 
 describe('the tutor sending the learner back to the lesson', () => {
-  const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+  const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
   const project: ProjectDTO = { id: 'p-1', title: 'P', goal: 'g', why: '', createdAt: '2026-10-05T10:00:00.000Z' };
   const chat: TranscriptEntry[] = [
     { t: 'ask', askId: 'a1', at: '', question: 'Judge my answer', lessonId: fourNumbers.id },

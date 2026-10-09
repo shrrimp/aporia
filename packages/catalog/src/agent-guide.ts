@@ -71,7 +71,7 @@ ${JSON.stringify(EXAMPLE)}
 
 ## Activities
 - drill { purpose: warmup|pretest|practice|exit, confidence (default true), items: [...] }
-  item common: id, prompt, kcs, difficulty 1–5 (3 = standard), why, transfer?, reviewOf? ("lesson/item" from the due-for-review list)
+  item common: id, prompt, kcs, difficulty 1–5 (3 = standard), why, transfer?
   mcq{options, answer (index), reason?{prompt?, options, answer}} numeric{answer, tolerance?} short{answer (reference)} order{lines (correct order)}
   Choosing a format (R8): to check understanding, prefer short (explain, predict in words) or numeric. Use mcq where
   recall would mostly fail (pretests, beginners), with distractors that are real misconceptions, and add a reason tier:
@@ -84,6 +84,12 @@ ${JSON.stringify(EXAMPLE)}
   checkpoint.suite: a plain test name or filter (letters, digits, . _ : / * ? - …). The app runs the learner's own
   test command; the suite goes where they put {suite} in it, otherwise the whole suite runs and counts.
 - utility-link { md, prompt? }  open-loop { md }
+
+## Review questions (write_review_questions, not in lessons)
+Asked on the Review page with the lesson closed, when one of their skills is due. Like a drill item without id, plus:
+  angle: apply|explain|predict|spot-the-error|compare|recall   context?: what the question needs to make sense on its own
+  vars?: { name: {min, max, step} }, used as {{ expression }} in the text, and as a numeric answer: "{{ r * w }}"
+  Kinds: mcq, numeric, order. Never point back at a lesson, section or figure; never repeat or reword an earlier question.
 
 ## Expression language
 Numbers, booleans, vectors [a, b, c], quaternions quat(w, x, y, z).

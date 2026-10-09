@@ -147,8 +147,13 @@ A lesson draft is **rejected** (and the reason returned to 🧠) unless:
 
 ## 7. Review and retrieval
 
-- FSRS schedules every retrievable item (R4). Warm-ups pull due items first, then items from
-  `confusable` KCs to interleave (R6).
+- FSRS schedules every **skill** the learner has answered on (R4), not each question: any
+  question on a skill reviews it. So a review asks a question the learner has not met (another
+  angle, situation or numbers), never a copy: it tests the skill, not the memory of one
+  question. Warm-ups pull due skills first, then `confusable` KCs to interleave (R6).
+- Review questions are written for review: the lesson is closed, so each one carries its own
+  context and never points back at a lesson. The tutor keeps a bank of them per project, and a
+  question with number placeholders comes back with new numbers (roadmap 1.10).
 - Item types for review, in preference order: **apply/infer** > produce > predict > recognise
   (R2). Review never re-shows a lesson's text as the review activity (R1: rereading is low
   utility).
@@ -219,7 +224,7 @@ A lesson draft is **rejected** (and the reason returned to 🧠) unless:
 | Scoring items | Exact and checkable items, tests | Free-form answers (rubric, double-scored) |
 | Hints | Level, gating, stuck detection, logging | Write the hint |
 | Factual checks | Run tests and computations | Second-sample check where ⚙ can't |
-| Review scheduling | All of it (FSRS) | Write review items once, at authoring |
+| Review scheduling | All of it (FSRS, per skill), and which question to ask | Write self-contained review questions, several angles per skill |
 | Motivation | Capability path, plans, reminders, streak rules | Narrative text, utility prompts |
 
 ## 13. How a learner (and we) know it works

@@ -28,6 +28,11 @@ export const profileFile = z.strictObject({
     sessionMode: z.enum(['interaction', 'lesson', 'permanent']).default('lesson'),
     /** D10: the user's choice; off by default. */
     encrypted: z.boolean().default(false),
+    /**
+     * Where new review questions come from (roadmap 1.10): a pool the tutor keeps stocked in the
+     * background, questions written when skills come due, or written once with new numbers each time.
+     */
+    reviewQuestions: z.enum(['pool', 'when-due', 'numbers']).default('pool'),
   }),
 });
 export type ProfileFile = z.output<typeof profileFile>;

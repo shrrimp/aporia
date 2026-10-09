@@ -257,7 +257,7 @@ describe('unsaved edits across restarts', () => {
 describe('the editor in a project', () => {
   it('opens next to the lesson, and task files open in it', async () => {
     const user = userEvent.setup();
-    const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+    const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
     const project: ProjectDTO = { id: 'p-1', title: 'P', goal: 'g', why: '', workspace: '/w', createdAt: '2026-10-05T10:00:00.000Z' };
     const r = rpc()
       .handle('projects.list', () => [project])
@@ -280,7 +280,7 @@ describe('the editor in a project', () => {
   });
 
   it('shows file names as text where there is no workspace', async () => {
-    const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false } };
+    const profile: ProfileDTO = { id: 'prof_1', displayName: 'J', createdAt: '2026-10-05T10:00:00.000Z', settings: { changeMode: 'review', sessionMode: 'lesson', encrypted: false, reviewQuestions: 'pool' } };
     const project: ProjectDTO = { id: 'p-1', title: 'P', goal: 'g', why: '', createdAt: '2026-10-05T10:00:00.000Z' };
     const r = new FakeRpc()
       .handle('projects.list', () => [project])

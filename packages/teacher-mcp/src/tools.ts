@@ -1,8 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { brand } from '@app/brand';
-import { catalogGuide, classifyWrite, formProblems, learnerForm, normalizeLesson, openTaskShapes, solutionFor, validateLesson, workspaceRelative, type Problem } from '@app/catalog';
+import {
+  catalogGuide,
+  classifyWrite,
+  formProblems,
+  learnerForm,
+  normalizeLesson,
+  openTaskShapes,
+  questionKey,
+  questionProblems,
+  reviewQuestion,
+  solutionFor,
+  validateLesson,
+  validateReviewBank,
+  workspaceRelative,
+  type Problem,
+} from '@app/catalog';
 import {
   HINT_LEVELS,
   checkHint,
@@ -21,6 +36,7 @@ import {
   curriculumTarget,
   deriveLearnerState,
   roadmapTarget,
+  skillMemories,
   validateRoadmap,
   validateAssessment,
   validateCurriculum,
@@ -38,9 +54,10 @@ import {
   type PatchOp,
 } from '@app/core';
 import { RULES, lessonTarget, teachingContext, type TeacherContext } from './context.ts';
-import { lessonIds, projectLessons } from './lessons.ts';
+import { lessonIds, projectLessons, reviewableItems } from './lessons.ts';
+import { readBank } from './reviews.ts';
 import { MAX_AGENT_FILE_CHARS, agentFileTarget, agentFilesEffect, isAgentFileTarget, projectAccess, readDisk, validateAgentFile, workspaceFile, type AgentFileDoc } from './files.ts';
-import { projectTarget } from './paths.ts';
+import { projectTarget, reviewsTarget } from './paths.ts';
 import { readSources, sourceText, validateSources } from './sources.ts';
 import { ensureRoadmap, roadmapPatches, roadmapUpdate } from './roadmap.ts';
 import { describeSkillMap, ensureSkillMap, knownSkills, readSkillMap, skillMapPatch, skillMapUpdate, withPendingReferences } from './skills.ts';
@@ -64,6 +81,7 @@ const CURRICULUM_TARGET = /^projects\/[^/]+\/curriculum\.json$/;
 const ASSESSMENT_TARGET = /^projects\/[^/]+\/assessment\.json$/;
 const SOURCES_TARGET = /^projects\/[^/]+\/sources\.json$/;
 const ROADMAP_TARGET = /^projects\/[^/]+\/roadmap\.json$/;
+const REVIEWS_TARGET = /^projects\/[^/]+\/reviews\.json$/;
 
 /**
  * Every document the app knows is validated on every change, whoever makes it: lessons, the
@@ -80,6 +98,7 @@ export function registerValidators(changes: ChangeService): void {
     if (ASSESSMENT_TARGET.test(target)) return validateAssessment(doc);
     if (SOURCES_TARGET.test(target)) return validateSources(doc);
     if (ROADMAP_TARGET.test(target)) return validateRoadmap(doc);
+    if (REVIEWS_TARGET.test(target)) return validateReviewBank(doc);
     return [];
   });
 }
@@ -432,6 +451,58 @@ Send the learner to it with a Markdown link to \`${link}\`, e.g. [Try it in the 
           done.push(`${id} (${change.status === 'applied' ? 'applied' : 'waiting for review'})`);
         }
         return ok(`Roadmap changes: ${done.join(', ')}.`);
+      }),
+  );
+
+  server.registerTool(
+    'write_review_questions',
+    {
+      description:
+        "Add questions to the project's review bank. They are asked on the Review page, with the lesson closed, when one of their skills is due, so each one must " +
+        'stand on its own (put what it needs in `context`), come at the skill from an `angle` (apply, explain, predict, spot-the-error, compare, recall), ' +
+        'and never repeat an earlier question. Kinds: mcq, numeric, order, written like drill items without an id. `vars` with {{ expressions }} in the text ' +
+        'and the answer make a template the app fills with new numbers each time. They apply at once (approving them would show their answers); ' +
+        'the ones with problems come back for you to fix.',
+      inputSchema: { questions: z.array(z.record(z.string(), z.unknown())).min(1).max(12), reason: z.string().min(1).max(500) },
+    },
+    async ({ questions, reason }) =>
+      guard(async () => {
+        // A question is on a skill the map describes, or one the learner has already been tested on.
+        const skills = new Set([...(await knownSkills(changes)), ...skillMemories(ctx.profile.journal.events, ctx.projectId).keys()]);
+        const bank = await readBank(changes, ctx.projectId);
+        const lessonItems = [...reviewableItems(await projectLessons(ctx.profile, ctx.projectId)).values()];
+        const asked = new Set([...Object.values(bank.questions).map((e) => questionKey(e.question.prompt)), ...lessonItems.map((r) => questionKey(r.item.prompt))]);
+        const at = ctx.profile.journal.now().toISOString();
+        const added: Record<string, JsonValue> = {};
+        const problems: string[] = [];
+        questions.forEach((raw, i) => {
+          const parsed = reviewQuestion.safeParse(raw);
+          if (!parsed.success) {
+            problems.push(`- ${i}: ${parsed.error.issues.map((x) => `${x.path.join('/')}: ${x.message}`).join('; ')}`);
+            return;
+          }
+          const q = parsed.data;
+          const own = [...questionProblems(q), ...q.kcs.filter((kc) => !skills.has(kc)).map((kc) => `kcs: "${kc}" is neither in the skill map nor tested yet`)];
+          const key = questionKey(q.prompt);
+          if (asked.has(key)) own.push('this question was already asked, in a lesson or a review: write a new one');
+          if (own.length) {
+            problems.push(`- ${i}: ${own.join('; ')}`);
+            return;
+          }
+          asked.add(key);
+          added[`r-${randomUUID().slice(0, 8)}`] = { question: q as unknown as JsonValue, at };
+        });
+        const ids = Object.keys(added);
+        const rejected = problems.length ? `\nNot saved; fix these and send them again:\n${problems.join('\n')}` : '';
+        if (ids.length === 0) return fail(`No question saved.${rejected}`);
+        const target = reviewsTarget(ctx.projectId);
+        const exists = (await changes.read(target)) !== null;
+        const patch: PatchOp[] = exists
+          ? ids.map((id) => ({ op: 'add', path: `/questions/${id}`, value: added[id]! }))
+          : [{ op: 'add', path: '', value: { questions: added, retiredItems: [] } }];
+        // Never queued for review, whatever the learner's setting: approving a question would show its answer.
+        const change = await changes.propose({ author: ctx.agent, target, patch, reason: `review questions: ${reason}` }, 'auto');
+        return ok(`Saved ${ids.length} review question(s) (change ${change.changeId}).${rejected}`);
       }),
   );
 

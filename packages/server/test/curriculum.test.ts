@@ -154,7 +154,7 @@ describe('the brain', () => {
     const node = (id: string) => b.nodes.find((n) => n.id === id)!;
     expect(node('dyn.featherstone')).toMatchObject({ suggested: true, discovered: false, why: 'Builds on the rotations you know', mastery: 'unseen', projects: [] });
     expect(node('quaternion.unit')).toMatchObject({ title: 'Unit quaternions', group: 'rotations', discovered: true, projects: [projectId] });
-    expect(node('quaternion.unit').struggling).toEqual(['2 of the last 4 answers missed', '1 review item fading']);
+    expect(node('quaternion.unit').struggling).toEqual(['2 of the last 4 answers missed', 'fading: due for review']);
     expect(node('misc.thing')).toMatchObject({ title: 'misc.thing', discovered: true, suggested: false, struggling: [] });
     expect(node('cpp.std-span').projects).toEqual([projectId]);
   });

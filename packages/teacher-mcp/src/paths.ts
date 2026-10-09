@@ -2,3 +2,4 @@
 export const lessonsDir = (projectId: string) => `projects/${projectId}/lessons`;
 export const lessonTarget = (projectId: string, lessonId: string) => `${lessonsDir(projectId)}/${lessonId}.json`;
 export const projectTarget = (projectId: string) => `projects/${projectId}/project.json`;
+export const reviewsTarget = (projectId: string) => `projects/${projectId}/reviews.json`;

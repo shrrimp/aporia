@@ -5,10 +5,10 @@ import {
   curriculumDoc,
   curriculumTarget,
   deriveLearnerState,
-  itemMemories,
   orderedMilestones,
   layers,
   MemoryModel,
+  skillMemories,
   pathState,
   prerequisites,
   projectProgress,
@@ -20,7 +20,7 @@ import {
   type SkillMap,
 } from '@app/core';
 import { lessonCompletion, type Lesson } from '@app/catalog';
-import { projectLessons, projectReviews, readRoadmap, readSkillMap, readSources, reviewableItems } from '@app/teacher-mcp';
+import { projectLessons, projectReviews, readRoadmap, readSkillMap, readSources } from '@app/teacher-mcp';
 import type { BrainDTO, CurriculumDTO, NextStepDTO, ProjectDTO } from './protocol.ts';
 
 /** Due items below this recall make their skills show as fading. */
@@ -119,7 +119,7 @@ export function nextStep(
       ? { kind: 'interview', existing: true, text: 'Start from what you already did: your tutor looks at your work and your files, then checks with you what you really master.' }
       : { kind: 'interview', existing: false, text: 'Start with a short interview, so the first lesson begins at the right level.' };
   }
-  if (due >= REVIEW_FIRST) return { kind: 'review', due, text: `Review ${due} items first: they are about to slip.` };
+  if (due >= REVIEW_FIRST) return { kind: 'review', due, text: `Review ${due} skills first: they are about to slip.` };
   const unfinished = [...plan.filter((p) => p.lessonId).map((p) => lessons.find((l) => l.id === p.lessonId)), ...lessons].find(
     (l) => l !== undefined && completion(l).done < completion(l).total,
   );
@@ -140,17 +140,15 @@ export async function brain(profile: OpenProfile, projects: readonly ProjectDTO[
   const memory = new MemoryModel();
 
   const usedBy = new Map<string, Set<string>>();
-  const fading = new Map<string, number>();
+  // Skills due for review and slipping from memory, in any project.
+  const fading = new Set<string>();
   for (const p of projects) {
     const lessons = await projectLessons(profile, p.id);
     const curriculum = curriculumDoc.safeParse(await profile.changes.read(curriculumTarget(p.id)));
     const kcs = [...lessons.flatMap((l) => l.kcs), ...(curriculum.success ? [...curriculum.data.goals, ...curriculum.data.plan.flatMap((x) => x.kcs)] : [])];
     for (const kc of kcs) usedBy.set(kc, (usedBy.get(kc) ?? new Set()).add(p.id));
-    const items = reviewableItems(lessons);
-    for (const [itemId, m] of itemMemories(profile.journal.events, p.id)) {
-      const item = items.get(itemId);
-      if (!item || m.card.due.getTime() > now.getTime() || memory.retrievability(m.card, now) >= FADING) continue;
-      for (const kc of item.item.kcs) fading.set(kc, (fading.get(kc) ?? 0) + 1);
+    for (const m of skillMemories(profile.journal.events, p.id).values()) {
+      if (m.card.due.getTime() <= now.getTime() && memory.retrievability(m.card, now) < FADING) fading.add(m.kc);
     }
   }
 
@@ -160,8 +158,7 @@ export async function brain(profile: OpenProfile, projects: readonly ProjectDTO[
     const s = map.skills[kc];
     const k = state.kcs.get(kc);
     const struggling = struggleReasons(k);
-    const fadingItems = fading.get(kc) ?? 0;
-    if (fadingItems > 0) struggling.push(`${fadingItems} review item${fadingItems === 1 ? '' : 's'} fading`);
+    if (fading.has(kc)) struggling.push('fading: due for review');
     return {
       id: kc,
       title: s?.title ?? kc,

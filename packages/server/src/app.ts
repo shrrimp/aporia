@@ -23,6 +23,7 @@ import {
   matchesFilter,
   ratingConfidence,
   systemClock,
+  REVIEW_CAP,
   GATED_FROM,
   HINT_LEVELS,
   hintStates,
@@ -38,7 +39,25 @@ import {
   splitCommand,
 } from '@app/core';
 import { agentPermissions, formAnswer, lessonCompletion, scoreProbe, type LearnerForm } from '@app/catalog';
-import { TeacherHttpServer, lessonTarget, projectLessons, projectReviews, projectTarget, readRoadmap, readSources, registerValidators, sourceText, isAgentFileTarget, type AgentFileDoc, type SourceEntry } from '@app/teacher-mcp';
+import {
+  BANK_PREFIX,
+  TeacherHttpServer,
+  lessonTarget,
+  projectLessons,
+  projectReviews,
+  projectTarget,
+  readBank,
+  readRoadmap,
+  readSources,
+  registerValidators,
+  reviewableItems,
+  reviewQuestionsBrief,
+  reviewsTarget,
+  sourceText,
+  isAgentFileTarget,
+  type AgentFileDoc,
+  type SourceEntry,
+} from '@app/teacher-mcp';
 import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent, type TurnLimits } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
 import { cutOff, recap, Transcripts, type TranscriptEntry } from './transcripts.ts';
@@ -47,6 +66,7 @@ import { brain, projectCurriculum } from './maps.ts';
 import { listDir, listFolders, readText, writeText } from './workspace.ts';
 import { addSource, removeSource, Uploads } from './sources.ts';
 import { Drafts, PlaceStore } from './place.ts';
+import { ReviewWriter, type WriterOptions } from './review-writer.ts';
 import { askInput, methods, type AskEvent, type HistoryItemDTO, type Method, type Params, type ProfileDTO, type ProjectDTO, type Results, type ServerEvents, type SourceDTO, type TaskHintsDTO } from './protocol.ts';
 
 const LEARNER: Author = { kind: 'learner' };
@@ -65,6 +85,8 @@ export interface AppOptions {
   readonly loginWaitMs?: number;
   /** How long a turn may go without a word from the agent before it is stopped (tests shorten it). */
   readonly turnLimits?: Partial<TurnLimits>;
+  /** Timing of the background review-question writer (tests shorten it). */
+  readonly reviewWriter?: WriterOptions;
 }
 
 type Emit = <E extends keyof ServerEvents>(event: E, data: ServerEvents[E]) => void;
@@ -73,6 +95,8 @@ interface OpenState {
   readonly profile: OpenProfile;
   settings: ProfileDTO['settings'];
   agents: AgentSessions;
+  /** Keeps the review questions stocked (roadmap 1.10). */
+  reviews: ReviewWriter;
   transcripts: Transcripts;
   drafts: Drafts;
   checkpoints: CheckpointRunner;
@@ -106,6 +130,7 @@ export class AppService {
   readonly #factory: HostFactory;
   readonly #loginWaitMs: number | undefined;
   readonly #turnLimits: Partial<TurnLimits> | undefined;
+  readonly #reviewWriterOptions: WriterOptions | undefined;
   readonly #emitters = new Set<Emit>();
   readonly #asks = new Map<string, () => Promise<void>>();
   /** Turns in progress, by ask id: where they are saved, and how to save their streamed text now. */
@@ -120,6 +145,7 @@ export class AppService {
     this.#spec = opts.agent ?? claudeAgent;
     this.#loginWaitMs = opts.loginWaitMs;
     this.#turnLimits = opts.turnLimits;
+    this.#reviewWriterOptions = opts.reviewWriter;
     // The real agent process; exercised by scripts/spike-*.ts rather than CI (it needs a login).
     /* v8 ignore next */
     this.#factory = opts.hostFactory ?? ((spec) => AgentHost.spawn(spec));
@@ -139,11 +165,17 @@ export class AppService {
     this.#teacher = undefined;
   }
 
+  /** Wait for the background work of the open profile: the review questions being written (tests). */
+  async idle(): Promise<void> {
+    await this.#open?.reviews.idle();
+  }
+
   async #closeProfile(): Promise<void> {
     if (!this.#open) return;
-    const { profile, agents, transcripts, checkpoints } = this.#open;
+    const { profile, agents, transcripts, checkpoints, reviews } = this.#open;
     this.#open = undefined;
     checkpoints.cancelAll();
+    reviews.close();
     await agents.close();
     await transcripts.flush();
     await profile.close();
@@ -188,6 +220,7 @@ export class AppService {
         profile,
         settings: profile.profile.settings,
         agents: undefined as unknown as AgentSessions,
+        reviews: undefined as unknown as ReviewWriter,
         transcripts: new Transcripts(profile.dir),
         drafts: new Drafts(profile.dir),
         checkpoints: new CheckpointRunner(profile),
@@ -200,6 +233,19 @@ export class AppService {
         () => state.settings,
         (status) => this.#emit('agent.status', status),
         this.#turnLimits,
+      );
+      state.reviews = new ReviewWriter(
+        {
+          mode: () => state.settings.reviewQuestions,
+          needs: async (projectId) => (await projectReviews(profile, projectId, profile.journal.now(), REVIEW_CAP, state.settings.reviewQuestions)).needs,
+          write: async (projectId, kcs) => {
+            const project = await this.#project(projectId);
+            await state.agents.background(project, await reviewQuestionsBrief(profile, projectId, kcs, state.settings.reviewQuestions));
+          },
+          onChange: () => this.#emit('changed', { what: 'reviews' }),
+          log: (message) => console.error(message),
+        },
+        this.#reviewWriterOptions,
       );
       this.#open = state;
       return toProfileDTO(profile.profile);
@@ -317,18 +363,67 @@ export class AppService {
       });
       this.#emit('changed', { what: 'learner' });
       this.#emit('changed', { what: 'reviews' });
+      this.#profile().reviews.request(a.projectId, 'answer');
       return { id: e.id };
     },
 
     'reviews.queue': async ({ projectId }) => {
-      const { profile } = this.#profile();
+      const state = this.#profile();
       await this.#project(projectId);
-      const r = await projectReviews(profile, projectId, profile.journal.now());
+      const r = await projectReviews(state.profile, projectId, state.profile.journal.now(), REVIEW_CAP, state.settings.reviewQuestions);
+      if (r.needs.length > 0) state.reviews.request(projectId, 'open', r.needs);
       return {
-        items: r.due.map((d) => ({ itemId: d.itemId, lessonId: d.lessonId, lessonTitle: d.lessonTitle, item: d.item, retrievability: d.retrievability, reviews: d.reviews })),
+        slots: r.due.map(({ kc, title, retrievability, reviews, question }) => ({
+          kc,
+          skill: title,
+          retrievability,
+          reviews,
+          ...(question ? { question: { id: question.id, item: question.item, seen: question.seen, ...(question.context ? { context: question.context } : {}), ...(question.from ? { from: question.from } : {}) } } : {}),
+        })),
         dueCount: r.dueCount,
         ...(r.nextDue ? { nextDue: r.nextDue } : {}),
+        writing: state.reviews.writing(projectId),
       };
+    },
+
+    'reviews.answer': async ({ projectId, questionId, evidenceType, outcome, confidence }) => {
+      const { profile, reviews } = this.#profile();
+      await this.#project(projectId);
+      const q = await this.#reviewQuestion(projectId, questionId);
+      const e = await profile.observations.recordEvidence({
+        author: SYSTEM,
+        itemId: questionId,
+        projectId,
+        kcs: q.kcs.map((kc) => ({ kc, weight: 1 })),
+        difficulty: difficultyFromLevel(q.difficulty),
+        evidenceType,
+        outcome,
+        transfer: q.transfer,
+        ...(confidence ? { confidence } : {}),
+      });
+      this.#emitMany(['learner', 'reviews']);
+      reviews.request(projectId, 'answer');
+      return { id: e.id };
+    },
+
+    'reviews.flag': async ({ projectId, questionId, evidenceId }) => {
+      const { profile, reviews } = this.#profile();
+      await this.#project(projectId);
+      await this.#reviewQuestion(projectId, questionId);
+      const target = reviewsTarget(projectId);
+      const exists = (await profile.changes.read(target)) !== null;
+      const patch: PatchOp[] = questionId.startsWith(BANK_PREFIX)
+        ? [{ op: 'add', path: `/questions/${questionId.slice(BANK_PREFIX.length)}/retired`, value: { at: profile.journal.now().toISOString(), reason: 'makes no sense without its lesson' } }]
+        : exists
+          ? [{ op: 'add', path: '/retiredItems/-', value: questionId }]
+          : [{ op: 'add', path: '', value: { questions: {}, retiredItems: [questionId] } }];
+      await profile.changes.propose({ author: LEARNER, target, patch, reason: 'review: a question made no sense without its lesson' }, 'auto');
+      // An answer given to it says nothing about the learner: it is withdrawn (only one to this question).
+      const answer = evidenceId ? profile.journal.events.find((e) => e.id === evidenceId) : undefined;
+      if (answer?.type === 'evidence' && answer.itemId === questionId) await profile.observations.revoke([answer.id], LEARNER, 'the question made no sense without its lesson');
+      this.#emitMany(['learner', 'reviews', 'history']);
+      reviews.request(projectId, 'flag');
+      return { ok: true as const };
     },
 
     'curriculum.get': async ({ projectId }) => projectCurriculum(this.#profile().profile, await this.#project(projectId)),
@@ -662,6 +757,20 @@ export class AppService {
     const project = await this.#project(projectId);
     if (!project.workspace) throw new AppError('conflict', 'This project has no workspace folder. Set one in the project settings.');
     return project.workspace;
+  }
+
+  /** What a review answer is recorded against: a bank question (not retired) or a lesson's own item. */
+  async #reviewQuestion(projectId: string, questionId: string): Promise<{ kcs: readonly string[]; difficulty: number; transfer: boolean }> {
+    const { profile } = this.#profile();
+    const bank = await readBank(profile.changes, projectId);
+    if (questionId.startsWith(BANK_PREFIX)) {
+      const found = bank.questions[questionId.slice(BANK_PREFIX.length)];
+      if (found && !found.retired) return found.question;
+    } else if (!bank.retiredItems.includes(questionId)) {
+      const item = reviewableItems(await projectLessons(profile, projectId)).get(questionId)?.item;
+      if (item) return item;
+    }
+    throw new AppError('not_found', `no review question ${questionId}`);
   }
 
   async #project(projectId: string): Promise<ProjectDTO> {
