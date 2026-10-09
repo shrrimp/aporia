@@ -7,7 +7,8 @@ import type { JsonValue, TranscriptEntry } from '@app/server/protocol';
 import { fourNumbers } from '../../catalog/fixtures/four-numbers.ts';
 import { LessonView } from '../src/lesson/LessonView.tsx';
 import { ProgressContext } from '../src/lesson/progress.tsx';
-import { CONTINUE, Conversation } from '../src/screens/Conversation.tsx';
+import { Conversation } from '../src/screens/Conversation.tsx';
+import { CONTINUE } from '../src/prompts.ts';
 import { ProjectView } from '../src/screens/ProjectView.tsx';
 import { applyEntry, replay } from '../src/screens/turns.ts';
 import { RpcProvider } from '../src/hooks.tsx';
@@ -183,7 +184,7 @@ describe('saved conversations', () => {
     );
     expect(await screen.findByText('Here is a form.')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Quick' })).toHaveTextContent('two');
-    expect(screen.getByText('Sent my answers to “Quick”')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Answers sent' })).toHaveTextContent('Quick');
     expect(screen.getByText(/Cut off: the app closed/)).toBeInTheDocument();
     expect(r.calls.find((c) => c.method === 'conversations.get')!.params).toEqual({ projectId: 'p', thread: 'session' });
   });
@@ -201,7 +202,7 @@ describe('saved conversations', () => {
       </RpcProvider>,
     );
     await user.click(await screen.findByRole('button', { name: 'Continue' }));
-    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ question: CONTINUE, thread: 'session' });
+    expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({ question: CONTINUE.question, shown: { kind: 'continue' }, thread: 'session' });
     // Working again: no second offer.
     expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
   });

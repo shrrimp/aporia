@@ -509,6 +509,7 @@ export class AppService {
           askId,
           at: open.profile.journal.now().toISOString(),
           question: q.question,
+          ...(q.shown ? { shown: q.shown } : {}),
           ...(q.selection ? { selection: q.selection } : {}),
           ...(q.answers ? { answersTo: q.answers.title } : {}),
           ...(q.lessonId ? { lessonId: q.lessonId } : {}),

@@ -51,7 +51,11 @@ describe('the place in the app', () => {
     await app.call('place.set', { profileId: 'prof_1', projectId: 'hmp', view: 'lesson', lessonId: 'l1', editor: true, file: 'physics/Joint.cpp' });
     expect(await app.call('place.set', { view: 'path', lessonId: null })).toEqual({ profileId: 'prof_1', projectId: 'hmp', view: 'path', editor: true, file: 'physics/Joint.cpp' });
     await expect(app.call('place.set', { view: 'nowhere' })).rejects.toMatchObject({ code: 'invalid_params' });
-    expect(await start().call('place.get', {})).toMatchObject({ view: 'path', file: 'physics/Joint.cpp' });
+    // The workspace layout is kept with it, and replaced whole.
+    await app.call('place.set', { layout: { contents: 260, margin: 420, folded: true } });
+    await app.call('place.set', { layout: { margin: 400 } });
+    await expect(app.call('place.set', { layout: { margin: -1 } })).rejects.toMatchObject({ code: 'invalid_params' });
+    expect(await start().call('place.get', {})).toMatchObject({ view: 'path', file: 'physics/Joint.cpp', layout: { margin: 400 } });
   });
 
   it('is empty when its file is unreadable', async () => {

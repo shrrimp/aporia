@@ -51,10 +51,16 @@ describe('LessonView', () => {
     const { a } = withActions(<LessonView lesson={golden} />);
     await user.click(screen.getByRole('button', { name: /I'm stuck/ }));
     await user.click(screen.getByRole('button', { name: 'Ask for a hint' }));
-    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/stuck on task "integratePosition"\. Give me the lowest/), { anchor: 'task:step-2' });
+    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/stuck on task "integratePosition"\. Give me the lowest/), {
+      anchor: 'task:step-2',
+      shown: { kind: 'hint', about: 'integratePosition' },
+    });
     await user.type(screen.getByLabelText('Your explanation'), 'Rotate into the parent frame at the midpoint orientation.');
     await user.click(screen.getByRole('button', { name: 'Send to your tutor' }));
-    expect(a.ask).toHaveBeenLastCalledWith(expect.stringMatching(/Explain-back[\s\S]*Rubric: velocity must be rotated[\s\S]*send me back to the lesson/), { anchor: expect.stringMatching(/\/\d+$/) });
+    expect(a.ask).toHaveBeenLastCalledWith(expect.stringMatching(/Explain-back[\s\S]*Rubric: velocity must be rotated[\s\S]*send me back to the lesson/), {
+      anchor: expect.stringMatching(/\/\d+$/),
+      shown: expect.objectContaining({ kind: 'explain-back', text: 'Rotate into the parent frame at the midpoint orientation.' }),
+    });
     expect(screen.getByRole('button', { name: 'Sent to your tutor' })).toBeDisabled();
   });
 });
@@ -97,7 +103,9 @@ describe('drills', () => {
     );
     await user.type(screen.getByLabelText('Your answer'), 'my answer');
     await user.click(screen.getByRole('button', { name: 'Check' }));
-    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/Judge my answer to drill item "s"[\s\S]*Reference: ref[\s\S]*send me back to the lesson/), undefined);
+    expect(a.ask).toHaveBeenCalledWith(expect.stringMatching(/Judge my answer to drill item "s"[\s\S]*Reference: ref[\s\S]*send me back to the lesson/), {
+      shown: expect.objectContaining({ kind: 'check-answer', text: 'my answer' }),
+    });
     expect(screen.getByText('Sent to your tutor for feedback.')).toBeInTheDocument();
     await user.click(screen.getByLabelText('x'));
     await user.click(screen.getByRole('button', { name: 'Lock in my guess' }));

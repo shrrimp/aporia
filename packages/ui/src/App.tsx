@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Params, Place, ProfileDTO, ProjectDTO } from '@app/server/protocol';
+import type { Layout, Params, Place, ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc, useStatus } from './hooks.tsx';
 import { ProfilePicker } from './screens/ProfilePicker.tsx';
 import { Home } from './screens/Home.tsx';
@@ -30,11 +30,14 @@ export function App() {
   // Where the learner was before the app closed (or crashed): restored once, at start.
   const [restoring, setRestoring] = useState(true);
   const [initial, setInitial] = useState<Place>();
+  // The workspace layout is the same in every project, and kept across restarts.
+  const [layout, setLayoutState] = useState<Layout>();
   useEffect(() => {
     let live = true;
     void (async () => {
       try {
         const place = await rpc.call('place.get', {});
+        if (live && place.layout) setLayoutState(place.layout);
         if (!place.profileId) return;
         const opened = await rpc.call('profiles.open', { profileId: place.profileId });
         const found = place.projectId ? (await rpc.call('projects.list', {})).find((p) => p.id === place.projectId) : undefined;
@@ -65,6 +68,13 @@ export function App() {
     (p: ProjectDTO | undefined) => {
       setProjectState(p);
       remember({ projectId: p?.id ?? null, view: null, lessonId: null, margin: null, editor: null, file: null });
+    },
+    [remember],
+  );
+  const setLayout = useCallback(
+    (l: Layout) => {
+      setLayoutState(l);
+      remember({ layout: l });
     },
     [remember],
   );
@@ -110,6 +120,8 @@ export function App() {
           profile={profile}
           {...(initial?.projectId === project.id ? { initial } : {})}
           onPlace={remember}
+          layout={layout}
+          onLayout={setLayout}
           onProfile={setProfile}
           onBack={() => setProject(undefined)}
           onBrain={() => setBrain(true)}

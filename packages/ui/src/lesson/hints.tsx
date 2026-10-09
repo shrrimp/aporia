@@ -1,5 +1,6 @@
 import { createContext, useContext, useState } from 'react';
 import type { TaskHintsDTO } from '@app/server/protocol';
+import { hintRequest, type Prompt } from '../prompts.ts';
 
 /** The open lesson's hints, by task, and how to record an attempt. Absent outside a project. */
 export interface HintActions {
@@ -38,7 +39,7 @@ export function HintLadder({ taskId }: { taskId: string }) {
  * "I'm stuck": asks the tutor for the lowest hint that helps. What the learner tried, written
  * here, is recorded as an attempt (it opens the higher levels) and sent with the question.
  */
-export function StuckButton({ taskId, title, ask }: { taskId: string; title: string; ask: (question: string) => void }) {
+export function StuckButton({ taskId, title, ask }: { taskId: string; title: string; ask: (prompt: Prompt) => void }) {
   const hints = useContext(HintsContext);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
@@ -59,8 +60,7 @@ export function StuckButton({ taskId, title, ask }: { taskId: string; title: str
       setError((err as Error).message);
       return;
     }
-    const tried = text ? ` What I tried: ${text}${/[.!?]$/.test(text) ? '' : '.'}` : '';
-    ask(`I'm stuck on task "${title}".${tried} Give me the lowest hint level that helps.`);
+    ask(hintRequest(title, text));
     setOpen(false);
     setDraft('');
   };

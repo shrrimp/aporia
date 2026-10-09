@@ -96,7 +96,7 @@ describe('PathView', () => {
     renderPath(<PathView projectId="p-1" curriculum={curriculum(next)} actions={a} />);
     expect(screen.getByRole('region', { name: "What's next" })).toHaveTextContent(next.text);
     await user.click(screen.getByRole('button', { name: label }));
-    if (arg) expect(a[action as keyof PathActions]).toHaveBeenCalledWith(expect.stringMatching(arg));
+    if (arg) expect(a[action as keyof PathActions]).toHaveBeenCalledWith(expect.objectContaining({ question: expect.stringMatching(arg) }));
     else expect(a[action as keyof PathActions]).toHaveBeenCalled();
   });
 
@@ -247,6 +247,6 @@ describe('the roadmap and claims on the path', () => {
     const a = actions();
     renderPath(<PathView projectId="p-1" curriculum={curriculum({ kind: 'interview', existing: true, text: 'x' })} actions={a} />);
     await user.click(screen.getByRole('button', { name: 'Start from my existing work' }));
-    expect(a.startSession).toHaveBeenCalledWith(expect.stringMatching(/^I already have work for this project[\s\S]*claims[\s\S]*probes/));
+    expect(a.startSession).toHaveBeenCalledWith({ question: expect.stringMatching(/^I already have work for this project[\s\S]*claims[\s\S]*probes/), shown: { kind: 'existing-work' } });
   });
 });

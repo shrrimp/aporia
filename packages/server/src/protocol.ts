@@ -274,6 +274,21 @@ export const answerInput = z.strictObject({
   transfer: z.boolean().default(false),
 });
 
+/**
+ * What the learner sees of a message the app wrote for them (a hint request, an answer to check,
+ * the interview...): a card with their own words, instead of the prompt the tutor gets.
+ */
+export const askShown = z.strictObject({
+  kind: z.enum(['message', 'hint', 'check-answer', 'explain-back', 'interview', 'existing-work', 'plan', 'draft-lesson', 'continue']),
+  /** What it is about: a task, a drill question, a planned lesson. */
+  about: z.string().max(4000).optional(),
+  /** The learner's own words, as they wrote them. */
+  text: z.string().max(4000).optional(),
+  /** Files the learner added with the message, by name. */
+  files: z.array(z.string().max(300)).max(50).optional(),
+});
+export type AskShown = z.output<typeof askShown>;
+
 export const askInput = z.strictObject({
   projectId: slugId,
   lessonId: slugId.optional(),
@@ -282,6 +297,8 @@ export const askInput = z.strictObject({
   /** Text the learner selected. */
   selection: z.string().max(4000).optional(),
   question: z.string().trim().min(1).max(4000),
+  /** Shown in place of the question, when the app wrote it. The tutor still gets the question. */
+  shown: askShown.optional(),
   /**
    * Which conversation this belongs to. "chat": quick questions, one agent session per lesson
    * (per the learner's setting). "session": the interview and planning page, one agent session
@@ -337,8 +354,18 @@ export const placeSchema = z.strictObject({
   margin: z.enum(['none', 'tutor', 'history', 'me', 'project']).optional(),
   editor: z.boolean().optional(),
   file: workspacePath.min(1).optional(),
+  /** The workspace layout, the same in every project: panel widths in pixels, and the contents folded to a rail. */
+  layout: z
+    .strictObject({
+      contents: z.int().min(0).max(10_000).optional(),
+      margin: z.int().min(0).max(10_000).optional(),
+      editor: z.int().min(0).max(10_000).optional(),
+      folded: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type Place = z.output<typeof placeSchema>;
+export type Layout = NonNullable<Place['layout']>;
 const placeChange = z.strictObject(
   Object.fromEntries(Object.entries(placeSchema.shape).map(([k, v]) => [k, v.unwrap().nullable().optional()])) as {
     [K in keyof typeof placeSchema.shape]: z.ZodOptional<z.ZodNullable<ReturnType<(typeof placeSchema.shape)[K]['unwrap']>>>;
@@ -484,7 +511,7 @@ export interface Results {
  * live events, so a restored conversation looks exactly like it did.
  */
 export type TranscriptEntry =
-  | { t: 'ask'; askId: string; at: string; question: string; selection?: string; answersTo?: string; lessonId?: string }
+  | { t: 'ask'; askId: string; at: string; question: string; shown?: AskShown; selection?: string; answersTo?: string; lessonId?: string }
   | { t: 'event'; askId: string; event: AskEvent }
   | { t: 'submitted'; askId: string; form: number; answers: Record<string, unknown> }
   | { t: 'end'; askId: string; state: 'done' | 'cancelled' | 'error'; error?: string };

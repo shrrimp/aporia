@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { AskShown } from '@app/server/protocol';
 
 export interface LessonActions {
   recordAnswer(a: {
@@ -11,7 +12,8 @@ export interface LessonActions {
     confidence?: 'sure' | 'think' | 'guess';
     transfer: boolean;
   }): void;
-  ask(question: string, opts?: { selection?: string; anchor?: string }): void;
+  /** Ask the tutor in the margin; `shown` is the card the learner sees when the app wrote the question. */
+  ask(question: string, opts?: { selection?: string; anchor?: string; shown?: AskShown }): void;
   /** Open one of the learner's files in the embedded editor (only when the project has a workspace). */
   openFile?(path: string): void;
 }

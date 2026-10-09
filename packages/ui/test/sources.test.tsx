@@ -90,7 +90,11 @@ describe('files in the tutor chat', () => {
     await user.click(screen.getByRole('button', { name: 'Send' }));
     expect(r.calls.find((c) => c.method === 'ask')!.params).toMatchObject({
       question: 'I added a file to the project: "lesson-03.html" (src_1). Have a look.',
+      shown: { kind: 'message', files: ['lesson-03.html'] },
     });
+    // The learner sees the file's name, not the note written for the tutor.
+    expect(await screen.findByRole('list', { name: 'Files added' })).toHaveTextContent('lesson-03.html');
+    expect(screen.queryByText(/I added a file/)).toBeNull();
     expect(screen.queryByRole('list', { name: 'Added files' })).toBeNull();
     act(() => r.emit('ask.done', { askId: 'a1', stopReason: 'end_turn' }));
 

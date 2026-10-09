@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lesson as lessonSchema, normalizeLesson, openTaskShapes, solutionFor } from '@app/catalog';
 import { LessonLinkContext, type CodeGate } from '../lesson/Markdown.tsx';
-import type { Params, Place, ProfileDTO, ProjectDTO } from '@app/server/protocol';
+import type { AskShown, Layout, Params, Place, ProfileDTO, ProjectDTO } from '@app/server/protocol';
 import { useQuery, useRpc } from '../hooks.tsx';
 import { LessonView } from '../lesson/LessonView.tsx';
 import { LessonActionsContext, type LessonActions } from '../lesson/actions.tsx';
 import { ProgressContext, type LessonProgress } from '../lesson/progress.tsx';
 import type { JsonValue } from '@app/server/protocol';
 import { PixelMark, Wordmark } from '../PixelMark.tsx';
+import { PATH, PixelIcon, REVIEW } from '../PixelIcon.tsx';
+import { EXISTING_WORK, INTERVIEW, PLAN_NEXT, type Prompt } from '../prompts.ts';
 import { Conversation, type AskRequest } from './Conversation.tsx';
 import { HistoryPanel } from './HistoryPanel.tsx';
 import { MePanel } from './MePanel.tsx';
 import { ProjectSettings } from './ProjectSettings.tsx';
 import { Review } from './Review.tsx';
-import { EXISTING_WORK_PROMPT, INTERVIEW_PROMPT, PathView, type PathActions } from './PathView.tsx';
+import { PathView, type PathActions } from './PathView.tsx';
+import { useLingering, Workspace } from './Workspace.tsx';
 import { AgentBadge, AgentNotice, useAgentStatus } from './AgentStatus.tsx';
 import { Editor } from '../editor/Editor.tsx';
 import { ErrorBoundary } from '../ErrorBoundary.tsx';
@@ -25,14 +28,16 @@ type View = 'session' | 'lesson' | 'review' | 'path';
 
 /**
  * The workspace: contents on the left; a page in the middle, either a lesson or a session (the
- * interview, planning: the heavy interactions get the whole page); and a margin with the quick
- * tutor chat, History and You.
+ * interview, planning: the heavy interactions get the whole page); the editor beside it, for a
+ * project with a folder; and a margin with the quick tutor chat, History and You.
  */
 export function ProjectView({
   project: opened,
   profile,
   initial,
   onPlace,
+  layout: initialLayout,
+  onLayout,
   onProfile,
   onBack,
   onBrain,
@@ -43,6 +48,9 @@ export function ProjectView({
   initial?: Place;
   /** Remember where the learner is, to come back to it after a restart. */
   onPlace?: (change: Params<'place.set'>) => void;
+  /** The panels' widths and folds, the same in every project. */
+  layout?: Layout | undefined;
+  onLayout?: (layout: Layout) => void;
   onProfile: (p: ProfileDTO) => void;
   onBack: () => void;
   /** Open the profile's brain view (absent where the app has nowhere to show it). */
@@ -130,11 +138,17 @@ export function ProjectView({
 
   // Quick questions from the lesson go to the chat in the margin.
   const ask = useCallback(
-    (question: string, opts?: { selection?: string; anchor?: string }) =>
-      setChatReq({ question, ...(opts?.selection ? { selection: opts.selection } : {}), ...(opts?.anchor ? { anchor: opts.anchor } : {}), nonce: Date.now() }),
+    (question: string, opts?: { selection?: string; anchor?: string; shown?: AskShown }) =>
+      setChatReq({
+        question,
+        ...(opts?.selection ? { selection: opts.selection } : {}),
+        ...(opts?.anchor ? { anchor: opts.anchor } : {}),
+        ...(opts?.shown ? { shown: opts.shown } : {}),
+        nonce: Date.now(),
+      }),
     [],
   );
-  const startSession = useCallback((question: string) => setSessionReq({ question, nonce: Date.now() }), []);
+  const startSession = useCallback((p: Prompt) => setSessionReq({ question: p.question, shown: p.shown, nonce: Date.now() }), []);
   const showChat = useCallback(() => setMargin('tutor'), []);
   // The tutor's links back into a lesson: open it there, and show the place for a moment.
   const [jump, setJump] = useState<{ lessonId: string; anchor: string | undefined }>();
@@ -168,9 +182,9 @@ export function ProjectView({
         setView('lesson');
       },
       openReview: () => setView('review'),
-      startSession: (question) => {
+      startSession: (p) => {
         setView('session');
-        startSession(question);
+        startSession(p);
       },
     }),
     [startSession],
@@ -232,10 +246,10 @@ export function ProjectView({
               looks at what you did, lists the skills it suggests, then checks each one with you. Nothing counts as known until you have shown it.
             </p>
             <div className="intro-actions">
-              <button type="button" className="primary" onClick={() => startSession(EXISTING_WORK_PROMPT)}>
+              <button type="button" className="primary" onClick={() => startSession(EXISTING_WORK)}>
                 Start from my existing work
               </button>
-              <button type="button" onClick={() => startSession(INTERVIEW_PROMPT)}>
+              <button type="button" onClick={() => startSession(INTERVIEW)}>
                 Start from scratch
               </button>
             </div>
@@ -246,7 +260,7 @@ export function ProjectView({
               Before the first lesson, your tutor asks a few questions to find out what you already know, so the lesson starts at the right level.
               Not knowing is fine: that is exactly what it needs to find out.
             </p>
-            <button type="button" className="primary" onClick={() => startSession(INTERVIEW_PROMPT)}>
+            <button type="button" className="primary" onClick={() => startSession(INTERVIEW)}>
               Start the interview
             </button>
           </>
@@ -254,12 +268,176 @@ export function ProjectView({
       ) : (
         <>
           <p>Work through bigger things with your tutor here: what to learn next, a new lesson, or a part that is not clicking.</p>
-          <button type="button" onClick={() => startSession('Based on my progress so far, what should I learn next? Propose the next lesson and draft it.')}>
+          <button type="button" onClick={() => startSession(PLAN_NEXT)}>
             Plan the next lesson
           </button>
         </>
       )}
     </section>
+  );
+
+  // Layout: the learner's panel widths, and what a closing panel shows while it slides away.
+  const [layout, setLayout] = useState<Layout>(initialLayout ?? {});
+  const changeLayout = useCallback(
+    (l: Layout) => {
+      setLayout(l);
+      onLayout?.(l);
+    },
+    [onLayout],
+  );
+  const shownMargin = useLingering(margin === 'none' ? undefined : margin);
+  const editorShown = useLingering(editorOn && project.workspace ? true : undefined) === true;
+
+  const contents = (
+    <nav className="toc" aria-label="Contents">
+      <button type="button" className="toc-tutor" aria-current={shown === 'session'} onClick={() => setView('session')} data-tip={lessons.data?.length === 0 ? 'Interview' : 'Sessions'} {...(sessionBusy ? { 'data-tip-meta': 'Working' } : {})}>
+        <span className="ico">
+          <PixelMark working={sessionBusy} size={16} />
+        </span>
+        <span className="t">{lessons.data?.length === 0 ? 'Interview' : 'Sessions'}</span>
+        {sessionBusy && <span className="status">working</span>}
+      </button>
+      <button type="button" className="toc-review" aria-current={shown === 'path'} onClick={() => setView('path')} data-tip="Path">
+        <span className="ico">
+          <PixelIcon rows={PATH} />
+        </span>
+        <span className="t">Path</span>
+      </button>
+      <button type="button" className="toc-review" aria-current={shown === 'review'} onClick={() => setView('review')} data-tip="Review" {...(due > 0 ? { 'data-tip-meta': `${due} due` } : {})}>
+        <span className="ico">
+          <PixelIcon rows={REVIEW} />
+          {due > 0 && <span className="badge" aria-hidden />}
+        </span>
+        <span className="t">Review</span>
+        {due > 0 && (
+          <span className="count" aria-label={`${due} due`}>
+            {due} due
+          </span>
+        )}
+      </button>
+      <h2>Lessons</h2>
+      <ol>
+        {lessons.data?.map((l, i) => {
+          const n = String(i + 1).padStart(2, '0');
+          const started = l.progress.total > 0 && l.progress.done > 0;
+          return (
+            <li key={l.id}>
+              <button
+                type="button"
+                aria-current={shown === 'lesson' && l.id === current}
+                onClick={() => {
+                  setLessonId(l.id);
+                  setView('lesson');
+                }}
+                data-tip={l.title}
+                data-tip-meta={`Lesson ${n}${started ? ` · ${l.progress.done}/${l.progress.total} done` : ''}`}
+              >
+                <span className="n">{n}</span>
+                <span className="t">
+                  <span>{l.title}</span>
+                </span>
+                {started && (
+                  <span className={`p ${l.progress.done === l.progress.total ? 'all' : ''}`} aria-label={`${l.progress.done} of ${l.progress.total} done`}>
+                    {l.progress.done}/{l.progress.total}
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {lessons.data?.length === 0 && <p className="quiet">Lessons appear here once your tutor has written them.</p>}
+    </nav>
+  );
+
+  const page = (
+    <div className="page">
+      <div className="session-view" hidden={shown !== 'session'}>
+        <AgentNotice status={agent.status} onCheck={agent.check} />
+        {curriculum.data && curriculum.data.nodes.length > 0 && (
+          <p className="path-card">
+            Your path: <span className="num">{curriculum.data.nodes.length}</span> skills, <span className="num">{curriculum.data.plan.length}</span> lessons planned.{' '}
+            <button type="button" className="text" onClick={() => setView('path')}>
+              See the path
+            </button>
+          </p>
+        )}
+        <ErrorBoundary area="the session">
+          <Conversation
+            projectId={project.id}
+            lessonId={current}
+            request={sessionReq}
+            intro={intro}
+            backTo={current ? currentTitle : undefined}
+            onBack={() => setView('lesson')}
+            onActivity={showSession}
+            onBusy={setSessionBusy}
+            proposals={margin !== 'tutor'}
+            gate={gate}
+          />
+        </ErrorBoundary>
+      </div>
+      {shown === 'review' && (
+        <ErrorBoundary area="the review">
+          <Review projectId={project.id} />
+        </ErrorBoundary>
+      )}
+      {shown === 'path' && curriculum.data && (
+        <ErrorBoundary area="the path">
+          <PathView projectId={project.id} curriculum={curriculum.data} actions={pathActions} />
+        </ErrorBoundary>
+      )}
+      <div className="lesson-view" hidden={shown !== 'lesson'} ref={lessonRef} onMouseUp={onMouseUp}>
+        <LessonActionsContext.Provider value={actions}>
+          <ProgressContext.Provider value={progress}>
+            <CheckpointContext.Provider value={checkpoints}>
+              <HintsContext.Provider value={hints}>
+                {/* Blocks read their saved state when they mount: wait for it, and remount per lesson. */}
+                <ErrorBoundary area="this lesson" resetKey={current}>
+                  {parsed?.success && savedProgress.data && <LessonView key={current} lesson={parsed.data} />}
+                </ErrorBoundary>
+              </HintsContext.Provider>
+            </CheckpointContext.Provider>
+          </ProgressContext.Provider>
+          {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}
+        </LessonActionsContext.Provider>
+      </div>
+      {chip && (
+        <button
+          type="button"
+          className="ask-chip"
+          style={{ left: chip.x, top: chip.y }}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            ask('', { selection: chip.text, ...(chip.anchor ? { anchor: chip.anchor } : {}) });
+            setChip(undefined);
+          }}
+        >
+          Ask about this
+        </button>
+      )}
+    </div>
+  );
+
+  // The tutor chat stays mounted, hidden, so a conversation survives switching panels.
+  const marginContent = (
+    <>
+      <div className="margin-pane tutor-pane" hidden={shownMargin !== 'tutor'}>
+        <AgentNotice status={agent.status} onCheck={agent.check} />
+        <ErrorBoundary area="the tutor chat">
+          <Conversation variant="chat" projectId={project.id} lessonId={current} request={chatReq} onActivity={showChat} onBusy={setChatBusy} gate={gate} />
+        </ErrorBoundary>
+      </div>
+      {shownMargin && shownMargin !== 'tutor' && (
+        <div className="margin-pane scroll-pane">
+          <ErrorBoundary area="this panel" resetKey={shownMargin}>
+            {shownMargin === 'history' && <HistoryPanel />}
+            {shownMargin === 'me' && <MePanel profile={profile} onSettings={onProfile} {...(onBrain ? { onBrain } : {})} />}
+            {shownMargin === 'project' && <ProjectSettings key={project.id} project={project} />}
+          </ErrorBoundary>
+        </div>
+      )}
+    </>
   );
 
   return (
@@ -296,134 +474,24 @@ export function ProjectView({
             ))}
           </nav>
         </header>
-        <div className={`workspace ${margin === 'none' ? '' : 'with-margin'} ${editorOn && project.workspace ? 'with-editor' : ''}`}>
-          <nav className="toc" aria-label="Contents">
-            <button type="button" className="toc-tutor" aria-current={shown === 'session'} onClick={() => setView('session')}>
-              <PixelMark working={sessionBusy} size={16} />
-              {lessons.data?.length === 0 ? 'Interview' : 'Sessions'}
-              {sessionBusy && <span className="status">working</span>}
-            </button>
-            <button type="button" className="toc-review" aria-current={shown === 'path'} onClick={() => setView('path')}>
-              Path
-            </button>
-            <button type="button" className="toc-review" aria-current={shown === 'review'} onClick={() => setView('review')}>
-              Review
-              {due > 0 && (
-                <span className="count" aria-label={`${due} due`}>
-                  {due} due
-                </span>
-              )}
-            </button>
-            <h2>Lessons</h2>
-            <ol>
-              {lessons.data?.map((l, i) => (
-                <li key={l.id}>
-                  <button
-                    type="button"
-                    aria-current={shown === 'lesson' && l.id === current}
-                    onClick={() => {
-                      setLessonId(l.id);
-                      setView('lesson');
-                    }}
-                  >
-                    <span className="n">{String(i + 1).padStart(2, '0')}</span>
-                    <span className="t">{l.title}</span>
-                    {l.progress.total > 0 && l.progress.done > 0 && (
-                      <span className={`p ${l.progress.done === l.progress.total ? 'all' : ''}`} aria-label={`${l.progress.done} of ${l.progress.total} done`}>
-                        {l.progress.done}/{l.progress.total}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ol>
-            {lessons.data?.length === 0 && <p className="quiet">Lessons appear here once your tutor has written them.</p>}
-          </nav>
-          <div className="page">
-            <div hidden={shown !== 'session'}>
-              <AgentNotice status={agent.status} onCheck={agent.check} />
-              {curriculum.data && curriculum.data.nodes.length > 0 && (
-                <p className="path-card">
-                  Your path: <span className="num">{curriculum.data.nodes.length}</span> skills, <span className="num">{curriculum.data.plan.length}</span> lessons planned.{' '}
-                  <button type="button" className="text" onClick={() => setView('path')}>
-                    See the path
-                  </button>
-                </p>
-              )}
-              <ErrorBoundary area="the session">
-                <Conversation
-                  projectId={project.id}
-                  lessonId={current}
-                  request={sessionReq}
-                  intro={intro}
-                  backTo={current ? currentTitle : undefined}
-                  onBack={() => setView('lesson')}
-                  onActivity={showSession}
-                  onBusy={setSessionBusy}
-                  proposals={margin !== 'tutor'}
-                  gate={gate}
-                />
-              </ErrorBoundary>
-            </div>
-            {shown === 'review' && (
-              <ErrorBoundary area="the review">
-                <Review projectId={project.id} />
-              </ErrorBoundary>
-            )}
-            {shown === 'path' && curriculum.data && (
-              <ErrorBoundary area="the path">
-                <PathView projectId={project.id} curriculum={curriculum.data} actions={pathActions} />
-              </ErrorBoundary>
-            )}
-            <div hidden={shown !== 'lesson'} ref={lessonRef} onMouseUp={onMouseUp}>
-              <LessonActionsContext.Provider value={actions}>
-                <ProgressContext.Provider value={progress}>
-                  <CheckpointContext.Provider value={checkpoints}>
-                    <HintsContext.Provider value={hints}>
-                      {/* Blocks read their saved state when they mount: wait for it, and remount per lesson. */}
-                      <ErrorBoundary area="this lesson" resetKey={current}>
-                        {parsed?.success && savedProgress.data && <LessonView key={current} lesson={parsed.data} />}
-                      </ErrorBoundary>
-                    </HintsContext.Provider>
-                  </CheckpointContext.Provider>
-                </ProgressContext.Provider>
-                {parsed && !parsed.success && <p className="error">This lesson could not be read: {parsed.error.message}</p>}
-              </LessonActionsContext.Provider>
-            </div>
-            {chip && (
-              <button
-                type="button"
-                className="ask-chip"
-                style={{ left: chip.x, top: chip.y }}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  ask('', { selection: chip.text, ...(chip.anchor ? { anchor: chip.anchor } : {}) });
-                  setChip(undefined);
-                }}
-              >
-                Ask about this
-              </button>
-            )}
-          </div>
-          {editorOn && project.workspace && (
-            <ErrorBoundary area="the editor" resetKey={openFile}>
-              <Editor projectId={project.id} open={openFile} onOpen={setOpenFile} />
-            </ErrorBoundary>
-          )}
-          <aside className="margin" hidden={margin === 'none'}>
-            <div hidden={margin !== 'tutor'}>
-              <AgentNotice status={agent.status} onCheck={agent.check} />
-              <ErrorBoundary area="the tutor chat">
-                <Conversation variant="chat" projectId={project.id} lessonId={current} request={chatReq} onActivity={showChat} onBusy={setChatBusy} gate={gate} />
-              </ErrorBoundary>
-            </div>
-            <ErrorBoundary area="this panel" resetKey={margin}>
-              {margin === 'history' && <HistoryPanel />}
-              {margin === 'me' && <MePanel profile={profile} onSettings={onProfile} {...(onBrain ? { onBrain } : {})} />}
-              {margin === 'project' && <ProjectSettings key={project.id} project={project} />}
-            </ErrorBoundary>
-          </aside>
-        </div>
+        <Workspace
+          layout={layout}
+          onLayout={changeLayout}
+          marginOpen={margin !== 'none'}
+          editorOpen={editorOn}
+          contents={contents}
+          page={page}
+          {...(project.workspace
+            ? {
+                editor: editorShown ? (
+                  <ErrorBoundary area="the editor" resetKey={openFile}>
+                    <Editor projectId={project.id} open={openFile} onOpen={setOpenFile} />
+                  </ErrorBoundary>
+                ) : null,
+              }
+            : {})}
+          margin={marginContent}
+        />
       </div>
     </LessonLinkContext.Provider>
   );

@@ -10,6 +10,7 @@ import { Explorable } from './Explorable.tsx';
 import { Drill } from './Drill.tsx';
 import { useLessonActions } from './actions.tsx';
 import { Checkpoint } from './checkpoints.tsx';
+import { explainBack } from '../prompts.ts';
 
 type Of<T extends Component['type']> = Extract<Component, { type: T }>;
 
@@ -130,12 +131,8 @@ function ExplainBack({ doc }: { doc: Of<'explain-back'> }) {
         onClick={() => {
           setSent(true);
           save({ text });
-          actions.ask(
-            `Explain-back on ${doc.kcs.join(', ')}. Prompt: ${doc.prompt}\nMy explanation: ${text}\nRubric: ${doc.rubric.join('; ')}\n` +
-              'Score it 0–5 twice independently against the rubric, record the evidence (explain-back, with agreement), then tell me what I got right and the one thing to fix, ' +
-              'and send me back to the lesson.',
-            { anchor },
-          );
+          const p = explainBack(doc, text);
+          actions.ask(p.question, { anchor, shown: p.shown });
         }}
       >
         {sent ? 'Sent to your tutor' : 'Send to your tutor'}
@@ -191,7 +188,7 @@ function Task({ doc }: { doc: Of<'task'> }) {
       )}
       {doc.checkpoint && <Checkpoint taskId={doc.id} suite={doc.checkpoint.suite} expect={doc.checkpoint.expect} />}
       <HintLadder taskId={doc.id} />
-      <StuckButton taskId={doc.id} title={doc.title} ask={(q) => actions.ask(q, { anchor: `task:${doc.id}` })} />
+      <StuckButton taskId={doc.id} title={doc.title} ask={(p) => actions.ask(p.question, { anchor: `task:${doc.id}`, shown: p.shown })} />
       <label className="task-done">
         <input
           type="checkbox"

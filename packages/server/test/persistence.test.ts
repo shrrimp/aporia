@@ -99,7 +99,10 @@ describe('saved conversations', () => {
       thread: 'session',
       answers: { askId: interview, form: 0, title: 'Where you are starting from', values: { bg: { choice: 'Matrices' } } },
     });
-    await ask(app, { projectId: project.id, question: 'quick one', thread: 'chat', selection: 'some passage' });
+    await ask(app, { projectId: project.id, question: 'quick one', thread: 'chat', selection: 'some passage', shown: { kind: 'message', text: 'quick', files: ['a.pdf'] } });
+    // The card is for the learner: the tutor gets the question as it was.
+    expect(log.prompts.at(-1)).toContain('The learner asks:\nquick one');
+    expect(log.prompts.at(-1)).not.toContain('a.pdf');
     expect(log.prompts.filter((x) => x.includes('<earlier-conversation>'))).toEqual([]); // same run: the agent remembers
     await app.close();
 
@@ -116,7 +119,7 @@ describe('saved conversations', () => {
     const texts = session.filter((e): e is Extract<TranscriptEntry, { t: 'event' }> => e.t === 'event' && e.event.kind === 'text' && e.askId === interview);
     expect(texts.length).toBeLessThanOrEqual(2);
     const chat = await again.call('conversations.get', { projectId: project.id, thread: 'chat' });
-    expect(chat[0]).toMatchObject({ t: 'ask', question: 'quick one', selection: 'some passage' });
+    expect(chat[0]).toMatchObject({ t: 'ask', question: 'quick one', selection: 'some passage', shown: { kind: 'message', text: 'quick', files: ['a.pdf'] } });
 
     await ask(again, { projectId: project.id, question: 'where were we?', thread: 'session' });
     const resumed = log.prompts.at(-1)!;

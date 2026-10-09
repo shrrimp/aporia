@@ -3,6 +3,7 @@ import type { CurriculumDTO, FindingDTO, HistoryItemDTO, MilestoneDTO, NextStepD
 import { useQuery, useRpc } from '../hooks.tsx';
 import { Markdown } from '../lesson/Markdown.tsx';
 import { ShowChange } from './Proposals.tsx';
+import { draftLesson, EXISTING_WORK, INTERVIEW, PLAN_MORE, type Prompt } from '../prompts.ts';
 
 const COL = 208;
 const ROW = 60;
@@ -35,33 +36,24 @@ export interface PathActions {
   openLesson(lessonId: string): void;
   openReview(): void;
   /** Start a session with the tutor on the session page. */
-  startSession(question: string): void;
+  startSession(prompt: Prompt): void;
 }
-
-export const INTERVIEW_PROMPT = 'Interview me briefly to find out what I already know for this project, then draft the first lesson.';
-
-/** For a project with work already done: start from it, and verify before believing it (P4). */
-export const EXISTING_WORK_PROMPT =
-  'I already have work for this project: my workspace and the files I added. Start from it. Explore it and read the files, ' +
-  'then tell me which skills they suggest I have, and record them as claims in my skill map. A claim is not proof: check each one ' +
-  'with short probes (questions about my own code are best) before anything counts. Then propose a roadmap for the rest of the ' +
-  'project, and the first lesson from where I really am.';
 
 function NextStep({ next, actions }: { next: NextStepDTO; actions: PathActions }) {
   const button = (() => {
     switch (next.kind) {
       case 'interview':
         return next.existing
-          ? { label: 'Start from my existing work', go: () => actions.startSession(EXISTING_WORK_PROMPT) }
-          : { label: 'Start the interview', go: () => actions.startSession(INTERVIEW_PROMPT) };
+          ? { label: 'Start from my existing work', go: () => actions.startSession(EXISTING_WORK) }
+          : { label: 'Start the interview', go: () => actions.startSession(INTERVIEW) };
       case 'review':
         return { label: 'Review now', go: () => actions.openReview() };
       case 'lesson':
         return { label: 'Continue', go: () => actions.openLesson(next.lessonId) };
       case 'draft':
-        return { label: 'Ask your tutor to write it', go: () => actions.startSession(`Draft the next lesson of the plan: "${next.title}" (plan item ${next.planId}). Set its lessonId on the plan once it is drafted.`) };
+        return { label: 'Ask your tutor to write it', go: () => actions.startSession(draftLesson(next.title, next.planId)) };
       case 'plan':
-        return { label: 'Plan with your tutor', go: () => actions.startSession('Everything planned is done. Based on my progress, propose what to learn next, update the plan, and draft the next lesson.') };
+        return { label: 'Plan with your tutor', go: () => actions.startSession(PLAN_MORE) };
     }
   })();
   return (

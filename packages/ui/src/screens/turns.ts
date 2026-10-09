@@ -1,5 +1,6 @@
 import type { FormAnswer, LearnerForm } from '@app/catalog';
-import type { AskEvent, TranscriptEntry } from '@app/server/protocol';
+import type { AskEvent, AskShown, TranscriptEntry } from '@app/server/protocol';
+import { shownFor } from '../prompts.ts';
 import { describeTool } from './activity.ts';
 
 export interface Step {
@@ -11,6 +12,8 @@ export interface Step {
 export interface Turn {
   readonly askId?: string;
   readonly question: string;
+  /** Shown in place of the question when the app wrote it (see prompts.ts). */
+  readonly shown?: AskShown;
   readonly selection?: string;
   /** Set when this message carries answers to a form: shown compactly. */
   readonly answersTo?: string;
@@ -52,13 +55,16 @@ function applyEvent(t: Turn, e: AskEvent): void {
  */
 export function applyEntry(turns: readonly Turn[], e: TranscriptEntry): Turn[] {
   switch (e.t) {
-    case 'ask':
+    case 'ask': {
       if (turns.some((t) => t.askId === e.askId)) return [...turns];
+      // Saved before cards were: recognise the app's own prompts.
+      const shown = e.shown ?? (e.answersTo ? undefined : shownFor(e.question));
       return [
         ...turns,
         {
           askId: e.askId,
           question: e.question,
+          ...(shown ? { shown } : {}),
           ...(e.selection ? { selection: e.selection } : {}),
           ...(e.answersTo ? { answersTo: e.answersTo } : {}),
           forms: [],
@@ -68,6 +74,7 @@ export function applyEntry(turns: readonly Turn[], e: TranscriptEntry): Turn[] {
           state: 'running',
         },
       ];
+    }
     case 'event':
       return onTurn(turns, e.askId, (t) => applyEvent(t, e.event));
     case 'submitted':

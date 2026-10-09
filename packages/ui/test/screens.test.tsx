@@ -244,6 +244,20 @@ describe('coming back after a restart', () => {
     expect(sets.at(-1)).toEqual({ projectId: null, view: null, lessonId: null, margin: null, editor: null, file: null });
   });
 
+  it('keeps the workspace layout, in every project and across restarts', async () => {
+    const user = userEvent.setup();
+    const { rpc, sets } = placed({ profileId: profile.id, projectId: project.id, layout: { contents: 300, folded: true } });
+    mount(rpc, <App />);
+    expect(await screen.findByRole('separator', { name: 'Resize the contents' })).toHaveAttribute('aria-valuenow', '56');
+    await user.click(screen.getByRole('button', { name: 'Expand contents' }));
+    expect(sets.at(-1)).toEqual({ layout: { contents: 300, folded: false } });
+    expect(screen.getByRole('separator', { name: 'Resize the contents' })).toHaveAttribute('aria-valuenow', '300');
+    // Another project opens with the same layout.
+    await user.click(screen.getByRole('button', { name: 'Projects' }));
+    await user.click(await screen.findByRole('button', { name: new RegExp(project.title) }));
+    expect(await screen.findByRole('separator', { name: 'Resize the contents' })).toHaveAttribute('aria-valuenow', '300');
+  });
+
   it('opens the first lesson when the remembered one is gone', async () => {
     const { rpc } = placed({ profileId: profile.id, projectId: project.id, view: 'lesson', lessonId: 'deleted-lesson' });
     mount(rpc, <App />);

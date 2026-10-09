@@ -4,6 +4,7 @@ import { useAnchor, useSaved } from './progress.tsx';
 import { Markdown } from './Markdown.tsx';
 import { score, shuffled, type Response } from './scoring.ts';
 import { useLessonActions } from './actions.tsx';
+import { checkAnswer } from '../prompts.ts';
 
 type Confidence = 'sure' | 'think' | 'guess';
 
@@ -47,12 +48,8 @@ export function Item({ item, confidence: askConfidence, purpose }: { item: Drill
 
   const submit = () => {
     if (item.kind === 'short') {
-      actions.ask(
-        `Judge my answer to drill item "${item.id}" (KCs ${item.kcs.join(', ')}). Question: ${item.prompt}\nMy answer: ${text}\n` +
-          `Reference: ${item.answer}\nScore it 0–5 against the reference twice independently, record the evidence (production, difficulty ${item.difficulty}), ` +
-          'give me feedback without lecturing, then send me back to the lesson.',
-        anchor ? { anchor } : undefined,
-      );
+      const p = checkAnswer(item, text);
+      actions.ask(p.question, { ...(anchor ? { anchor } : {}), shown: p.shown });
       keep(-1);
       return;
     }

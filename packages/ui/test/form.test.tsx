@@ -117,7 +117,7 @@ describe('forms inside the conversation', () => {
     await user.click(screen.getByLabelText('two'));
     await user.click(screen.getByRole('button', { name: 'Send answers' }));
     expect(r.calls.filter((c) => c.method === 'ask').at(-1)!.params).toMatchObject({ question: expect.stringMatching(/^Answers to the form "Quick"/) });
-    expect(await screen.findByText('Sent my answers to “Quick”')).toBeInTheDocument();
+    expect(await screen.findByRole('group', { name: 'Answers sent' })).toHaveTextContent('Quick');
     expect(screen.queryByRole('button', { name: 'Send answers' })).toBeNull();
   });
 });
