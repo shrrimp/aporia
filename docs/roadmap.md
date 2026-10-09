@@ -74,6 +74,7 @@ Make the tutor measurably good, not just functional.
 | # | Work |
 |---|---|
 | 2.1 | **Hint ladder enforced**: hint level recorded per task, attempt gating for L4+, level visible to the learner (H1–H2). **Done**: the tutor calls `record_hint` before a hint and the app enforces the ladder (start at L0–L1, one level at a time, L4+ only after a checkpoint run, a change to the task's files or a written attempt); each task shows its ladder; evidence on the task, checkpoints included, counts the hints |
+| 2.1b | **Test results the app can read**: every test the tutor writes is declared by name before it runs and reports its result to the app, so each one shows by name as passed or failed, even when nothing compiles (then every one of them fails). See below |
 | 2.2 | **Difficulty controller and activity mix fed into authoring**: scaffold level, success band and the mix of code and questions passed to the agent and checked by the validator (§3–§5), with bounded learner control. See below |
 | 2.3 | **Misconceptions** as first-class objects (suspected → resolved), surfaced on the Me page |
 | 2.4 | **Catalog v2**: `animation`, `simulation`, `manipulate` (drag), `math-input` with equivalence checking, `fill-in`, `sketch-answer` |
@@ -82,6 +83,96 @@ Make the tutor measurably good, not just functional.
 | 2.6 | **Agent eval suite**: scripted learner scenarios plus rubric judging, run across models; the score must not regress when the rules change (quality §4) |
 | 2.7 | **Research base files** (`system/research/`) with every ○ citation verified, plus a `search_research` tool |
 | 2.8 | **Brain view**: the profile's whole skill graph as one big map, see below. **Second version done** (nested groups, folding by zoom, colours by area; map, list, details, suggestions, struggles) |
+
+### 2.1b Test results the app can read
+
+Today a checkpoint reads the summary line a test runner prints, in one of 12 known formats.
+That is fine for the learner's own suites, but the tests the tutor writes have no requirements
+at all. When their output is in a format the app does not know, or the build fails before any
+test runs, the app learns nothing: no names, no states, just a raw log. A test the tutor writes
+must tell the app at least its name and whether it passed, and the app must be able to say so
+even when nothing compiles.
+
+**The rule:** a tutor-written test passes only when its run reports a pass. Everything else
+(a failure, a skip, a build that broke, a crash, a test that never reported) is a failure,
+shown under that test's name.
+
+- **Tests are declared before they run.** A program that never compiled cannot report anything,
+  so the names cannot come from the run. The tutor writes a suite through one tool (e.g.
+  `write_tests`) that writes its files and declares its tests together: the suite's name, and
+  for each test a stable id, a readable title, and optionally the skills it checks and the
+  lesson anchor it belongs to. The declaration is a change in the profile (reviewable,
+  undoable), not a file a run could alter, so the app always knows which tests to expect.
+- **Results go to a report, not the console.** Build tools capture, reorder or hide what tests
+  print (CTest, cargo, parallel runners). For each run the app makes a fresh, empty report
+  folder and passes it to the learner's test command in `APORIA_TEST_REPORT_DIR` (with
+  `APORIA_TEST_SUITE`). Each test process writes its own JSON Lines file there, one event per
+  line: `{"v":1,"event":"start"}` as soon as the test program runs, one result per test
+  (`{"v":1,"event":"result","test":"quat-unit-length","status":"pass"}`), and
+  `{"v":1,"event":"end"}` when it finishes. `test` and `status` (`pass`, `fail`, `skip`,
+  `error`) are required; everything else is optional. A file per process is safe with parallel
+  runners, and a crash mid-run keeps the lines already written.
+- **The app fills in what a run did not say.** After every run, each declared test gets exactly
+  one state:
+
+  | What the run produced for the test | State | Shown as |
+  |---|---|---|
+  | `pass` | passed | ✓ |
+  | `fail` or `error` | failed | its message, expected and actual |
+  | `skip` | failed | "skipped" |
+  | nothing; no `start` anywhere; the command failed | failed | "did not compile", with the first error |
+  | nothing; no `start` anywhere; the command succeeded | failed | "not run: your test command does not run this suite", with how to add it |
+  | nothing; a `start` but no `end` | failed | "crashed or stopped before this test ran" (or "timed out") |
+  | nothing, though the run started and ended | failed | "did not report": a defect in the tests |
+
+  A test reported twice fails if either report fails. Results for ids nobody declared are shown
+  apart and counted nowhere. Unreadable lines are skipped and counted. The ladder counts passed
+  tests only.
+- **Whose fault it is, for the learner model.** Every failure is shown, but not every failure is
+  evidence about the learner. When the build's first errors point into the tests folder, when a
+  test "did not report", or when the ids do not match the declaration, the tutor's tests are
+  what is broken. That run is marked as such, records no evidence, does not count as an attempt
+  for the hint ladder (2.1), and the tutor is told what to fix. Errors in the learner's own
+  files count as they do today. Error locations are read from the usual compiler formats (GCC
+  and Clang, MSVC, rustc, tsc, Python tracebacks); when the app cannot tell, it blames no one.
+- **More data, within limits.** A result may also carry a `message`, `expected` and `actual`,
+  the `file` and `line` of the check, `durationMs`, named numbers (`metrics`), and data for a
+  figure (a series or points), which the app draws with its own plot and 3D components, as for
+  exercises (2.4b); never HTML or code. A line is at most 64 KB and a report at most 8 MB:
+  anything past that is cut and flagged. Every line is checked against the schema, and only what
+  passes is kept.
+- **Enforced when the tests are written.** `write_file` refuses test files in the tests folder:
+  tests go through the suite tool. The validator refuses a suite whose declared ids do not all
+  appear in its files, and a checkpoint on a suite in the tests folder that was never declared.
+  A checkpoint names the tests a step expects to pass (`expect: { tests: [...] }`), so the
+  ladder is about named tests, not only a count; counts stay for the learner's own suites.
+- **Reporters come from the app.** So the format is always right, the app ships small reporters
+  that the tutor installs into the tests folder through a tool and never writes itself:
+  listeners or plugins for GoogleTest, Catch2, pytest, Vitest and Jest, Go and cargo, plus a
+  plain header or module for tests without a framework. A reporter writes `start` the moment the
+  test program runs, so a missing `start` reliably means "never ran". (To decide: also read
+  JUnit XML where a framework writes it natively, under the same rules.)
+- **What the learner sees.** Under the task, every declared test by its title and state; for a
+  failure, its message and the lesson section it belongs to, never the fix (ux §4). A broken
+  build shows once, at the top, with its first error and the full output folded. What changed
+  since the last run stands out: newly passing tests, and regressions.
+- **What the tutor sees.** The same results in its context (failing tests with their messages,
+  regressions, the first build error, and any defect in its own tests), and from `run_tests`
+  when it checks its work.
+- **The learner's own tests are unchanged.** Suites the learner wrote keep today's output
+  parsers. They can install a reporter themselves to get named results.
+- **Not a security boundary.** The learner's code runs in the same process as the tests and
+  could write to the report. That would be the learner fooling themselves, not an attack: this
+  contract is about the tutor's tests being reliable.
+
+Builds on 1.2 (checkpoint runner) and 2.1 (hint ladder). Exercises (2.4b) depend on it.
+
+**Exit test:** in a C++ project whose stub does not compile yet, the tutor writes a suite of six
+tests. The task lists all six by name, failed, "did not compile", with the first compiler error.
+Once the code compiles and one test crashes, the tests after it show "crashed or stopped before
+this test ran". A typo in a declared id is reported as a defect in the tutor's tests, and no
+evidence is recorded. The same works in a Python project. Taking the suite out of the test
+command shows "not run" with how to add it back.
 
 ### 2.2 The activity mix, and what the learner can change
 
@@ -127,10 +218,11 @@ needs practice.
   from a goal; a Parsons puzzle first for novices.
 - **Editing:** the embedded editor (Monaco) inside the lesson, kept as a draft while typing.
 - **Running:** through the checkpoint runner (no shell, time limits, the learner's own
-  toolchain). Three checks: **tests** (pass/fail by name), **output** (stdout against what is
-  expected), **visual** (the program prints data, e.g. points, frames, a series, which the app
-  draws with its own plot and 3D components from a spec the tutor wrote; never tutor-written
-  HTML or JavaScript). E.g. plot |q| over 10,000 integration steps and watch it drift.
+  toolchain). Three checks: **tests** (pass/fail by name, reported as in 2.1b), **output**
+  (stdout against what is expected), **visual** (the program prints data, e.g. points, frames,
+  a series, which the app draws with its own plot and 3D components from a spec the tutor
+  wrote; never tutor-written HTML or JavaScript). E.g. plot |q| over 10,000 integration
+  steps and watch it drift.
 - **Evidence:** every attempt is evidence (first try or not, hints used), feeding the skill
   ratings and the difficulty controller.
 - **Coming back:** a passed exercise joins spaced review. When it is due, the tutor writes a
@@ -141,7 +233,7 @@ needs practice.
 - **Safety:** tests are tutor-written code that runs on the learner's machine, so exercises need
   a permission (the "tests" one or their own), and the test file is always visible.
 
-Depends on 1.2 (checkpoint runner), 1.8 (editor) and 2.2 (scaffold level picks the form).
+Depends on 1.2 (checkpoint runner), 1.8 (editor), 2.1b (test results) and 2.2 (scaffold level picks the form).
 
 **Exit test:** in a Heavy Metal Physics lesson, the tutor adds a quaternion exercise after a
 weak answer; I write it in the lesson, run it until it passes, and a variation of it shows up
