@@ -172,6 +172,23 @@ describe('a tutor that goes quiet', () => {
     expect(spawned).toBe(2);
   });
 
+  it('shrugs off a stuck tutor that fails to cancel and to close', async () => {
+    let spawned = 0;
+    const { app, projectId } = await start(async (s) => {
+      const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
+      if (++spawned === 1) {
+        host.prompt = () => new Promise(() => undefined);
+        host.cancel = () => Promise.reject(new Error('no answer'));
+        const close = host.close.bind(host);
+        host.close = () => close().then(() => Promise.reject(new Error('already gone')));
+      }
+      return host;
+    }, { ...limits, stopMs: 50 });
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({ event: 'ask.error' });
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({ event: 'ask.done' });
+    expect(spawned).toBe(2);
+  });
+
   it('is given longer while one of its tools runs, and not after', async () => {
     const { app, projectId } = await start(async (s) => {
       const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
