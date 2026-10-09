@@ -39,7 +39,7 @@ import {
 } from '@app/core';
 import { agentPermissions, formAnswer, lessonCompletion, scoreProbe, type LearnerForm } from '@app/catalog';
 import { TeacherHttpServer, lessonTarget, projectLessons, projectReviews, projectTarget, readRoadmap, readSources, registerValidators, sourceText, isAgentFileTarget, type AgentFileDoc, type SourceEntry } from '@app/teacher-mcp';
-import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent } from './agent-sessions.ts';
+import { AgentSessions, buildAskPrompt, type HostFactory, type TurnEvent, type TurnLimits } from './agent-sessions.ts';
 import { AppError } from './errors.ts';
 import { cutOff, recap, Transcripts, type TranscriptEntry } from './transcripts.ts';
 import { CheckpointRunner } from './checkpoint-runner.ts';
@@ -63,6 +63,8 @@ export interface AppOptions {
   readonly hostFactory?: HostFactory;
   /** How long a check waits for an agent to report its login (tests shorten it). */
   readonly loginWaitMs?: number;
+  /** How long a turn may go without a word from the agent before it is stopped (tests shorten it). */
+  readonly turnLimits?: Partial<TurnLimits>;
 }
 
 type Emit = <E extends keyof ServerEvents>(event: E, data: ServerEvents[E]) => void;
@@ -103,6 +105,7 @@ export class AppService {
   readonly #spec: AgentSpec;
   readonly #factory: HostFactory;
   readonly #loginWaitMs: number | undefined;
+  readonly #turnLimits: Partial<TurnLimits> | undefined;
   readonly #emitters = new Set<Emit>();
   readonly #asks = new Map<string, () => Promise<void>>();
   /** Turns in progress, by ask id: where they are saved, and how to save their streamed text now. */
@@ -116,6 +119,7 @@ export class AppService {
     this.#place = new PlaceStore(opts.dataRoot);
     this.#spec = opts.agent ?? claudeAgent;
     this.#loginWaitMs = opts.loginWaitMs;
+    this.#turnLimits = opts.turnLimits;
     // The real agent process; exercised by scripts/spike-*.ts rather than CI (it needs a login).
     /* v8 ignore next */
     this.#factory = opts.hostFactory ?? ((spec) => AgentHost.spawn(spec));
@@ -188,7 +192,15 @@ export class AppService {
         drafts: new Drafts(profile.dir),
         checkpoints: new CheckpointRunner(profile),
       };
-      state.agents = new AgentSessions(this.#spec, this.#factory, this.#teacher, profile, () => state.settings, (status) => this.#emit('agent.status', status));
+      state.agents = new AgentSessions(
+        this.#spec,
+        this.#factory,
+        this.#teacher,
+        profile,
+        () => state.settings,
+        (status) => this.#emit('agent.status', status),
+        this.#turnLimits,
+      );
       this.#open = state;
       return toProfileDTO(profile.profile);
     },

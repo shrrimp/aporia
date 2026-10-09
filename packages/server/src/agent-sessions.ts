@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
-import { agentProblem, type AgentHost, type AgentSpec, type AuthStatus, type HostEvent } from '@app/agent-host';
+import { AgentHostError, agentProblem, type AgentHost, type AgentSpec, type AuthStatus, type HostEvent } from '@app/agent-host';
 import { Mutex, resolveInside, writeJsonAtomic, type OpenProfile } from '@app/core';
 import { systemPrompt, type Registration, type TeacherHttpServer } from '@app/teacher-mcp';
 import { brand } from '@app/brand';
@@ -14,7 +14,21 @@ export type TurnEvent = HostEvent | { readonly kind: 'form'; readonly form: Lear
 
 export type HostFactory = (spec: AgentSpec) => Promise<AgentHost>;
 
+/** How long a turn may go without a word from the agent before the app stops it. */
+export interface TurnLimits {
+  /** While it thinks or writes. */
+  readonly quietMs: number;
+  /** While one of its tools runs: a test run takes up to 5 minutes (teacher-mcp `measure`). */
+  readonly toolMs: number;
+  /** How long a stopped turn has to end before the agent is closed as hung. */
+  readonly stopMs: number;
+}
+
+const TURN_LIMITS: TurnLimits = { quietMs: 3 * 60_000, toolMs: 6 * 60_000, stopMs: 15_000 };
+
 interface Live {
+  /** The agent the session lives in: any other agent, such as one started since, does not know it. */
+  readonly host: AgentHost;
   readonly sessionId: string;
   readonly reg: Registration;
   /** Where forms from `ask_learner` go during the current turn. */
@@ -43,9 +57,12 @@ export class AgentSessions {
   readonly #profile: OpenProfile;
   readonly #settings: () => ProfileDTO['settings'];
   #host: Promise<AgentHost> | undefined;
+  /** Bumped each time the agent is replaced: a failure in an earlier one says nothing about the current one. */
+  #generation = 0;
   readonly #live = new Map<string, Live>();
   readonly #saved = new Mutex();
   readonly #onStatus: (s: AgentStatusDTO) => void;
+  readonly #limits: TurnLimits;
   #status: AgentStatusDTO;
 
   constructor(
@@ -55,6 +72,7 @@ export class AgentSessions {
     profile: OpenProfile,
     settings: () => ProfileDTO['settings'],
     onStatus: (s: AgentStatusDTO) => void,
+    limits: Partial<TurnLimits> = {},
   ) {
     this.#spec = spec;
     this.#factory = factory;
@@ -62,6 +80,7 @@ export class AgentSessions {
     this.#profile = profile;
     this.#settings = settings;
     this.#onStatus = onStatus;
+    this.#limits = { ...TURN_LIMITS, ...limits };
     this.#status = { agent: spec.displayName, state: 'unknown' };
   }
 
@@ -89,9 +108,7 @@ export class AgentSessions {
     else if (problem === 'missing') this.#setStatus({ state: 'missing', message });
     else if (problem === 'stopped') {
       // Start a fresh agent next time; its sessions died with it.
-      this.#host = undefined;
-      for (const l of this.#live.values()) l.reg.revoke();
-      this.#live.clear();
+      this.#reset();
       this.#setStatus({ state: 'stopped', message });
     }
     else this.#setStatus({ state: 'error', message });
@@ -103,7 +120,7 @@ export class AgentSessions {
    * given a few seconds to say so; otherwise the login is known at the first question.
    */
   async check(waitForLoginMs = 6000): Promise<AgentStatusDTO> {
-    if (this.#status.state === 'stopped' || this.#status.state === 'error' || this.#status.state === 'missing') this.#host = undefined;
+    if (this.#status.state === 'stopped' || this.#status.state === 'error' || this.#status.state === 'missing') this.#reset();
     this.#setStatus({ state: 'starting' });
     let host: AgentHost;
     try {
@@ -155,6 +172,19 @@ export class AgentSessions {
     return this.#host;
   }
 
+  /**
+   * Stop the agent and forget its sessions: the next question starts a new agent, which resumes
+   * the saved sessions. The old agent is stopped, not left running beside the new one.
+   */
+  #reset(): void {
+    const old = this.#host;
+    this.#host = undefined;
+    this.#generation++;
+    for (const l of this.#live.values()) l.reg.revoke();
+    this.#live.clear();
+    void old?.then((h) => h.close()).catch(() => undefined);
+  }
+
   get #sessionsFile(): string {
     return path.join(this.#profile.dir, 'agent-sessions.json');
   }
@@ -182,8 +212,7 @@ export class AgentSessions {
    * resume it (it keeps its memory, including a turn cut off by a crash), else a new one.
    * `resumed` says which: a new session needs a recap of the conversation.
    */
-  async #open(project: ProjectDTO, key: string | undefined): Promise<Live & { resumed: boolean }> {
-    const host = await this.#hostOnce();
+  async #open(host: AgentHost, project: ProjectDTO, key: string | undefined): Promise<Live & { resumed: boolean }> {
     const earlier = key ? (await this.#readSaved())[key] : undefined;
     // Code projects run in their workspace; others in their own project folder.
     const cwd = project.workspace ?? resolveInside(this.#profile.dir, 'projects', project.id);
@@ -204,14 +233,14 @@ export class AgentSessions {
       if (canResume) {
         try {
           await host.resumeSession(earlier.sessionId, opts, scope);
-          return Object.assign(live, { sessionId: earlier.sessionId, reg, resumed: true });
+          return Object.assign(live, { host, sessionId: earlier.sessionId, reg, resumed: true });
         } catch {
           // The agent no longer has it (deleted, another machine): start over with a recap.
         }
       }
       const sessionId = await host.newSession(opts, scope);
       if (key) await this.#remember(key, { agent: this.#spec.id, sessionId, actor, cwd });
-      return Object.assign(live, { sessionId, reg, resumed: false });
+      return Object.assign(live, { host, sessionId, reg, resumed: false });
     } catch (err) {
       reg.revoke();
       throw err;
@@ -230,11 +259,11 @@ export class AgentSessions {
     recap?: () => string | undefined,
   ): Promise<string> {
     const key = this.#key(project, lessonId, thread);
-    const live = key ? this.#live.get(key) : undefined;
+    const generation = this.#generation;
     try {
-      return await this.#ask(project, key, live, prompt, onEvent, onStart, recap);
+      return await this.#ask(project, key, prompt, onEvent, onStart, recap);
     } catch (err) {
-      this.#failed(err);
+      if (generation === this.#generation) this.#failed(err);
       if (agentProblem(err) === 'login') throw new Error(loginHelp(this.#spec));
       if (agentProblem(err) === 'missing') throw new Error(`${this.#spec.displayName} could not be started, so your tutor cannot answer. ${(err as Error).message}`);
       throw err;
@@ -244,14 +273,21 @@ export class AgentSessions {
   async #ask(
     project: ProjectDTO,
     key: string | undefined,
-    live: Live | undefined,
     prompt: string,
     onEvent: (e: TurnEvent) => void,
     onStart: (cancel: () => Promise<void>) => void,
     recap?: () => string | undefined,
   ): Promise<string> {
+    const host = await this.#hostOnce();
+    let live = key ? this.#live.get(key) : undefined;
+    if (live && live.host !== host) {
+      // Opened in an agent that has been replaced since: open it again in this one.
+      live.reg.revoke();
+      this.#live.delete(key!);
+      live = undefined;
+    }
     if (!live) {
-      const opened = await this.#open(project, key);
+      const opened = await this.#open(host, project, key);
       live = opened;
       if (key) {
         this.#live.set(key, opened);
@@ -259,15 +295,21 @@ export class AgentSessions {
         if (earlier) prompt = `${earlier}\n\n${prompt}`;
       }
     }
-    const host = await this.#hostOnce();
     const sessionId = live.sessionId;
     onStart(() => host.cancel(sessionId));
-    live.sink = onEvent;
+    const watch = watchTurn(this.#limits, this.#spec.displayName, () => host.cancel(sessionId));
+    const events = (e: TurnEvent) => {
+      if (watch.seen(e)) onEvent(e);
+    };
+    live.sink = events;
     try {
-      const stop = await host.prompt(sessionId, prompt, onEvent);
+      const stop = await Promise.race([host.prompt(sessionId, prompt, events), watch.stuck]);
+      // Stopped for its silence, not by the learner: the question ends saying why.
+      if (watch.quiet && stop === 'cancelled') throw watch.quiet;
       if (this.#status.state !== 'ready') this.#setStatus(this.#fromAuth(host.authStatus));
       return stop;
     } finally {
+      watch.done();
       live.sink = undefined;
       if (!key) live.reg.revoke();
     }
@@ -280,6 +322,55 @@ export class AgentSessions {
     this.#host = undefined;
     if (host) await (await host.catch(() => undefined))?.close();
   }
+}
+
+/**
+ * Watch a turn for silence. An agent that says nothing for too long (stuck refreshing its login,
+ * retrying an overloaded service) is asked to stop, and `quiet` says why the question ended. One
+ * that does not stop either is hung: `stuck` rejects, and the agent is closed.
+ */
+function watchTurn(limits: TurnLimits, agent: string, cancel: () => Promise<void>) {
+  const tools = new Set<string>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let over = false;
+  let hung!: (err: AgentHostError) => void;
+  const watch = {
+    quiet: undefined as AgentHostError | undefined,
+    stuck: new Promise<never>((_, reject) => (hung = reject)),
+    /** Note an event; false once the turn is over (a hung agent may still talk, to nobody). */
+    seen(e: TurnEvent): boolean {
+      if (over) return false;
+      if (e.kind === 'tool') {
+        if (e.status === 'completed' || e.status === 'failed') tools.delete(e.id);
+        else tools.add(e.id);
+      }
+      if (!watch.quiet) arm();
+      return true;
+    },
+    done(): void {
+      over = true;
+      clearTimeout(timer);
+    },
+  };
+  function arm(): void {
+    clearTimeout(timer);
+    const ms = tools.size > 0 ? limits.toolMs : limits.quietMs;
+    timer = setTimeout(() => {
+      watch.quiet = new AgentHostError(`${agent} said nothing for ${duration(ms)}, so the question was stopped. Ask again.`);
+      void cancel().catch(() => undefined);
+      timer = setTimeout(
+        () => hung(new AgentHostError(`${agent} said nothing for ${duration(ms)} and did not stop when asked, so it was closed. Ask again to start it afresh.`, 'stopped')),
+        limits.stopMs,
+      );
+    }, ms);
+  }
+  arm();
+  return watch;
+}
+
+function duration(ms: number): string {
+  const [n, unit] = ms >= 60_000 ? [Math.round(ms / 60_000), 'minute'] : [Math.round(ms / 1000), 'second'];
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 /** What to do when the agent is not logged in. The app never handles the login itself (architecture §1). */

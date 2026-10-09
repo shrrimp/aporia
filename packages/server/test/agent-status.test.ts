@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AgentHost, AgentHostError, genericAgent, type AgentSpec } from '@app/agent-host';
 import { ManualClock } from '@app/core';
 import { AppService, type HostFactory } from '../src/index.ts';
-import { loginHelp } from '../src/agent-sessions.ts';
+import { loginHelp, type TurnLimits } from '../src/agent-sessions.ts';
 import type { AgentStatusDTO } from '../src/protocol.ts';
 import { fakeTeacherAgent } from './fake-teacher-agent.ts';
 
@@ -24,8 +24,8 @@ afterEach(async () => {
 
 const spec = genericAgent('fake', 'Fake Tutor', { command: 'unused', args: [] });
 
-async function start(hostFactory: HostFactory) {
-  app = new AppService({ dataRoot: root, clock: new ManualClock('2026-10-06T10:00:00.000Z'), agent: spec, hostFactory });
+async function start(hostFactory: HostFactory, turnLimits?: Partial<TurnLimits>) {
+  app = new AppService({ dataRoot: root, clock: new ManualClock('2026-10-06T10:00:00.000Z'), agent: spec, hostFactory, ...(turnLimits ? { turnLimits } : {}) });
   const statuses: AgentStatusDTO[] = [];
   app.subscribe((e, d) => e === 'agent.status' && statuses.push(d as AgentStatusDTO));
   const p = await app.call('profiles.create', { displayName: 'Ada' });
@@ -91,6 +91,26 @@ describe('agent status', () => {
     expect(statuses.at(-1)).toMatchObject({ state: 'ready' });
   });
 
+  it('picks the conversation up in the new agent when the learner tries again after an error', async () => {
+    const hosts: AgentHost[] = [];
+    let closed = 0;
+    const { app, projectId } = await start(async (s) => {
+      const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
+      const close = host.close.bind(host);
+      host.close = () => (closed++, close());
+      hosts.push(host);
+      return host;
+    });
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({ event: 'ask.done' });
+    expect(await askAndWait(app, projectId, 'crash')).toMatchObject({ event: 'ask.error' });
+    expect(await app.call('agent.check', {})).toMatchObject({ state: 'ready' });
+    expect(hosts).toHaveLength(2);
+    expect(closed).toBe(1); // the replaced agent is stopped, not left running
+    // The conversation's session lived in the replaced agent: it is opened again in the new one.
+    expect(await askAndWait(app, projectId, 'hello again')).toMatchObject({ event: 'ask.done' });
+    expect(await app.call('agent.status', {})).toMatchObject({ state: 'ready' });
+  });
+
   it('reports other failures as errors, and a login that runs out while waiting', async () => {
     const { app, projectId } = await start((s) => AgentHost.inProcess(fakeTeacherAgent(), s));
     expect(await askAndWait(app, projectId, 'crash')).toMatchObject({ event: 'ask.error' });
@@ -102,5 +122,70 @@ describe('agent status', () => {
     const p = await app.call('profiles.create', { displayName: 'Ada' });
     await app.call('profiles.open', { profileId: p.id });
     expect(await app.call('agent.check', {})).toEqual({ agent: 'Fake Tutor', state: 'ready' });
+  });
+});
+
+describe('a tutor that goes quiet', () => {
+  const limits = { quietMs: 80, toolMs: 1000, stopMs: 500 };
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('has the question stopped, saying why, and answers the next one', async () => {
+    let spawned = 0;
+    const { app, statuses, projectId } = await start(async (s) => {
+      spawned++;
+      const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
+      // A question about silence gets none: the turn only ends when it is cancelled.
+      const prompt = host.prompt.bind(host);
+      let cancelled: (() => void) | undefined;
+      host.prompt = (id, p, onEvent) =>
+        JSON.stringify(p).includes('silence') ? new Promise<void>((r) => (cancelled = r)).then(() => 'cancelled' as const) : prompt(id, p, onEvent);
+      host.cancel = async () => cancelled?.();
+      return host;
+    }, limits);
+    expect(await askAndWait(app, projectId, 'silence?')).toMatchObject({
+      event: 'ask.error',
+      data: { message: expect.stringMatching(/^Fake Tutor said nothing for \d+ seconds?, so the question was stopped\. Ask again\.$/) },
+    });
+    expect(statuses.at(-1)).toMatchObject({ state: 'error' });
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({ event: 'ask.done' });
+    expect(spawned).toBe(1); // it stopped when asked, so it was kept
+    expect(statuses.at(-1)).toMatchObject({ state: 'ready' });
+  });
+
+  it('closes a tutor that does not stop when asked, and starts a new one for the next question', async () => {
+    let spawned = 0;
+    let closed = 0;
+    const { app, statuses, projectId } = await start(async (s) => {
+      const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
+      if (++spawned === 1) host.prompt = () => new Promise(() => undefined); // never answers, not even a cancel
+      const close = host.close.bind(host);
+      host.close = () => (closed++, close());
+      return host;
+    }, { ...limits, stopMs: 50 });
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({
+      event: 'ask.error',
+      data: { message: expect.stringMatching(/did not stop when asked, so it was closed\. Ask again to start it afresh\.$/) },
+    });
+    expect(statuses.at(-1)).toMatchObject({ state: 'stopped' });
+    expect(closed).toBe(1);
+    expect(await askAndWait(app, projectId, 'hello')).toMatchObject({ event: 'ask.done' });
+    expect(spawned).toBe(2);
+  });
+
+  it('is given longer while one of its tools runs, and not after', async () => {
+    const { app, projectId } = await start(async (s) => {
+      const host = await AgentHost.inProcess(fakeTeacherAgent(), s);
+      host.prompt = async (_id, prompt, onEvent) => {
+        onEvent({ kind: 'tool', id: 't1', title: 'Run the tests', status: 'in_progress' });
+        await pause(250); // longer than quietMs, well within toolMs
+        onEvent({ kind: 'tool', id: 't1', status: 'completed' });
+        if (JSON.stringify(prompt).includes('then think')) await pause(300); // quiet again, without a tool
+        onEvent({ kind: 'stop', reason: 'end_turn' });
+        return 'end_turn';
+      };
+      return host;
+    }, { ...limits, stopMs: 50 });
+    expect(await askAndWait(app, projectId, 'run the tests')).toMatchObject({ event: 'ask.done' });
+    expect(await askAndWait(app, projectId, 'run the tests then think')).toMatchObject({ event: 'ask.error', data: { message: expect.stringMatching(/said nothing/) } });
   });
 });
